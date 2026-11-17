@@ -1,1 +1,67 @@
-# Scaling-Factor-RTS
+# Scaling Factor
+
+An RTS where the goal is building an automated war machine rather than having the best APM. Gather resources, process them into materials, and set up structures that turn materials into units on their own.
+
+It is an installable web app (PWA) for computers, hosted on GitHub Pages.
+
+The game is built in stages, each tried before the next starts. What the game does is in [`SPEC.md`](SPEC.md) (Caleb's spec); the stage plan and every choice left to the builder are in [`docs/decisions.md`](docs/decisions.md).
+
+## What is in it so far (Stage 1)
+
+| Area | What it does |
+| --- | --- |
+| Home | Single-player, plus Multiplayer and Settings marked for later stages. |
+| Single-player | Pick a map and start a match. Until the CPU arrives (Stage 5), you are alone on the map. |
+| The map | Basin: an island around a lake, 192 × 192 tiles, with water, cliff ridges, 60 resource nodes (seven resources, three purities) and six start locations. Isometric view. |
+| Fog of war | Everything starts fogged except around your Hub. Units lift the fog for good as they explore. |
+| Units | Your Hub and 3 Minutemen. Click or drag to select, right-click to send them somewhere. |
+| Building | Pick a structure from the build menu and place it on the grid: never in fog, on water or on cliffs; a Drill goes on a node. Demolish your own structures. Structures do not work yet (Stage 2). |
+| Camera | W A S D or the arrow keys; zoom with the on-screen buttons or + and -. |
+
+The full list of controls is in the match menu (Esc).
+
+## Run it on your computer
+
+Needs Node.js 20.19 or newer.
+
+```bash
+npm install
+```
+
+```bash
+npm run dev
+```
+
+Open the address it prints (usually http://localhost:5173).
+
+To check the simulation (maps are connected, matches are deterministic, and how fast it is with 800 units):
+
+```bash
+npm run check:sim
+```
+
+## Put it online (GitHub Pages)
+
+1. The repository must be **public** (Pages is free for public repositories).
+2. **Settings > Pages > Build and deployment > Source**: choose **GitHub Actions**.
+3. Push to `main`. [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds and publishes the app to `https://<your-username>.github.io/<repo-name>/`.
+
+To install it, open the site in Chrome or Edge on a computer and use the browser's Install button.
+
+## Project layout
+
+```
+src/
+  sim/           the simulation: deterministic, whole numbers only, changed only by commands
+  sim/content/   resources, structures and units from the spec
+  sim/map/       map building and the fixed maps
+  render/        drawing: isometric math, terrain chunks, structures, units, colors
+  game/          running a match: the loop, camera, mouse and keyboard, the match HUD
+  pages/         Home, Single-player, the match screen
+  components/    page frame, buttons, cards
+  graphics/      app icon, Croswell Industries logo
+scripts/         check-sim (map, determinism and speed checks)
+docs/            the builder's decisions
+```
+
+Built with React, TypeScript, Vite, Tailwind CSS and vite-plugin-pwa. Headings use Norwester by Jamie Wilson (SIL Open Font License, `src/assets/fonts/`).
