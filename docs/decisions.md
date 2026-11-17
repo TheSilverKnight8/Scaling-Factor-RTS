@@ -6,8 +6,8 @@ The spec leaves implementation to Claude Code (SPEC "Working agreement": framewo
 
 Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortcuts are added in the stage that builds what they control.
 
-1. **Foundation and the map:** the app shell and main menu; one of the three maps (ground, water, cliffs, nodes with purity, about 6 start locations); the isometric view; the camera (WASD/arrow keys, zoom buttons); fog of war; the Hub and the 3 starting Minutemen with drag-to-select and move orders; placing structures on the grid with the fog, water and cliff rules. **(this stage)**
-2. **The starting economy:** the Hub inventory and its capacity; build costs and full-refund demolition; moving items into the Hub by hand; Drill, Smelter, Constructor and Depot; Belt, Splitter and Merger; Solar Generator, power lines, grids blowing and manual restart; choosing target buildings for nodes; the starting iron and copper recipes.
+1. **Foundation and the map:** the app shell and main menu; one of the three maps (ground, water, cliffs, nodes with purity, about 6 start locations); the isometric view; the camera (WASD/arrow keys, zoom buttons); fog of war; the Hub and the 3 starting Minutemen with drag-to-select and move orders; placing structures on the grid with the fog, water and cliff rules. **(done; Caleb's checkpoint changes done)**
+2. **The starting economy:** the Hub inventory and its capacity; build costs and full-refund demolition; moving items into the Hub by hand; Drill, Smelter, Constructor and Depot; Belt, Splitter and Merger; Solar Generator, power poles and lines, grids blowing and manual restart; the starting iron and copper recipes. (A Drill's target building is wherever its belts lead, Caleb.) **(done)**
 3. **Units and combat:** Deployer production (one unit type at a time, pausing at the unit limit); hand-placed units from the Hub; units acting on their own or waiting for orders, and the four imperatives; the melee, ranged and air targeting rules; attacking structures; health; the Hub's pulse.
 4. **Research and the full content**, in three steps:
    - 4a. The Laboratory and the semi-random tree (different per player, always completable); all materials and the remaining processors; Pump and Pipe; Coal and Fuel Generators, fueled by hand or automatically.
@@ -32,8 +32,13 @@ Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortc
 | What explored areas show | Everything: once explored, a place stays fully visible, enemy units included (from Stage 3). |
 | Look | Slightly darker and grittier in-game colors, like StarCraft. |
 | Dark mode | Not necessary. Light only. |
+| Merging (after Stage 1) | "Let's get as much done as we can before merging": stages carry on, each on its own branch on top of the last, and are merged to `main` together later. |
+| How a Drill's resources reach its target building (Stage 2) | By belt. Structures whose ports touch and face each other connect with no belt, as in Satisfactory. |
+| Moving items by hand between the Hub and a structure (Stage 2) | Instant, at any distance. |
+| Power lines (Stage 2; the spec has no poles) | Power poles, with lines that connect poles and structures. |
+| Belts and ground units (Stage 2) | Belts block ground units. |
 
-Nothing is waiting on Caleb.
+Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 are under "Stage 2: for Caleb to check".
 
 ## Builder's additions in Stage 1 (not named in the spec; easy to remove)
 
@@ -41,6 +46,21 @@ Nothing is waiting on Caleb.
 - **A list of controls in the pause menu.**
 - **"Stage N" tags** on menu entries that are not built yet (Multiplayer, Settings, Story mode, the other two maps, the CPU). They go away as the stages land.
 - Until Stage 5, **Match vs CPU starts a match with only you on the map**, so the map, camera, fog, units and placement can be tried.
+
+## Builder's additions in Stage 2 (not named in the spec; easy to remove)
+
+- **The Hub's inventory across the top of the screen**, with its count and capacity.
+- **Adding a Smelter's or Constructor's ingredients by hand from the Hub.** The spec names by-hand delivery for unit parts and fuel; the same button is given to machines, which helps at the very start.
+- **Arrows on item ports** while building (cream into a structure, red out of it), and **badges** over structures with no power, a blown grid or no recipe.
+- **Laying a belt over your own belt turns it** to the new direction, free.
+- **Power lines carry on from the last structure connected**, so a row of poles is a click each.
+- **Demolishing also returns what a structure holds** to the Hub, and **changing a recipe** returns its ingredients and products.
+
+## Stage 2: for Caleb to check
+
+- **Starting out.** The spec starts every player with enough for a Drill and some Solar Generators. Satisfactory's Smelter and Constructor cost parts that need a Smelter and a Constructor to make, so here the Smelter costs 40 Iron Ore and the Constructor 30 Iron Ingots. The opening goes: Drill and Solar Generators, take the Drill's ore to the Hub by hand, build a Smelter, take its ingots to the Hub, build a Constructor.
+- **Grids blow easily at the start.** A Drill (5 MW) joined to a single Solar Generator (4 MW) blows that grid at once, and it stays blown until restarted from any structure on it, even after more Solar Generators are joined. That is the spec's rule (current demand over supply); stringing the Solar Generators together before the Drill avoids it.
+- **A structure with no power does nothing**, including a Depot: it neither takes items from belts nor puts them out (SPEC: all structures need power to run). By-hand moves still work.
 
 ## Platform
 
@@ -58,10 +78,11 @@ Nothing is waiting on Caleb.
 | --- | --- |
 | Rate | 20 ticks a second, fixed. Drawing runs at the screen's rate and moves units smoothly between ticks. |
 | Numbers | Whole numbers only. A position is in 1/1024 of a tile. No floating-point functions whose last digits can differ between browsers (sine, cosine, powers, Math.random). Maps are laid out with written-out sine and cosine values for multiples of 15 degrees. |
-| Changes | Only `step()` changes the match. Every player action is a command (move, build, demolish so far), applied at the start of the next tick and checked there. |
+| Changes | Only `step()` changes the match. Every player action is a command (move, build, demolish, belts, power lines, by-hand moves, recipes, grid restart), applied at the start of the next tick and checked there. |
+| Order in a tick | Commands, building progress, structures (power, then work, then products out of output ports), belts, units, fog. |
 | Random numbers | One seeded generator in the match state. The seed picks start locations; in multiplayer the host will choose it. |
 | Fingerprint | `stateHash()` sums up the match each tick; multiplayer will compare it between computers to catch a mismatch early. |
-| Check | `npm run check:sim` builds every map and checks that every start reaches every other start and every node on foot, runs the same 4-player match twice and compares fingerprints every tick, and runs the load test below. |
+| Check | `npm run check:sim` builds every map and checks that every start reaches every other start and every node on foot; runs the same 4-player match twice and compares fingerprints every tick; plays the opening from the starting inventory to Iron Plates twice and compares; checks belts, a splitter, a merger taking turns, a grid blowing and restarting, refunds and recipe changes; and runs the load tests below. |
 
 ## Map (Stage 1)
 
@@ -71,19 +92,19 @@ Nothing is waiting on Caleb.
 | Tiles | Ground, water and cliffs. Water and cliffs block placement and all ground units (air units arrive in Stage 4c). Cliffs are raised rock ridges; there is no high ground (not in the spec). |
 | Map 1: Basin | An island around a central lake. Six start locations sit on a ring 70 tiles from the center, 60 degrees apart. A cliff ridge runs out between each pair of neighbors, from 30 to 55 tiles from the center, so ground routes go around the inner ring or the outer ring. Each sector has a pond and a rock outcrop. |
 | Nodes on Basin (60) | Near each start: Normal Iron and Copper about 9 tiles away, Impure Iron and Copper about 10 tiles away, Impure Coal about 14 tiles toward the lake. In each sector's middle: Normal Coal, Quartz and Sulfur. Shared between neighbors: Pure Iron or Pure Copper on the lake shore (alternating), Normal Oil or Gold on the outer ring (alternating). Each start's nodes are placed with a fixed offset of up to one tile, so starts are balanced with a little variance (SPEC). |
-| Purity | Shown by how many ore rocks sit on the node (2 Impure, 3 Normal, 4 Pure; oil pools grow instead) and named when the node is selected. What purity changes (gathering rate) comes in Stage 2. |
+| Purity | Shown by how many ore rocks sit on the node (2 Impure, 3 Normal, 4 Pure; oil pools grow instead) and named when the node is selected. A Drill gathers 30, 60 or 120 a minute (Satisfactory's Miner Mk.1). |
 | Maps 2 and 3 | Stage 5. |
 
 ## Structures (Stage 1)
 
 | Item | Choice |
 | --- | --- |
-| Build menu | The structures the spec lists as available at the start that are built yet: Drill, Smelter, Constructor, Deployer, Solar Generator, Depot, Laboratory. Belts and power lines come in Stage 2; the rest unlock through research in Stage 4. In Stage 1 placing is free and the structures do nothing yet. |
-| Footprints (tiles) | Hub 5×5. Drill and Pump 2×2 (a node is 2×2). Smelter 2×2, Constructor 2×3, Foundry and Assembler 3×3, Refinery 3×4, Manufacturer 4×4. Deployer 3×3, Garage and Landing Pad 4×4. Command Post 2×2. Solar Generator 2×2, Coal and Fuel Generators 3×3. Depot 2×2. Laboratory 3×3. Gun Turret, Arc Pile and Mortar 2×2. Tunable. |
+| Build menu (Stage 2) | Three tabs. Production: Drill 1, Smelter 2, Constructor 3, Deployer 4, Depot 5, Laboratory 6. Power: Solar Generator 7, Power Pole P, Power Line L. Transport: Belt B, Splitter T, Merger M. Hovering shows the cost and what it does; entries the Hub cannot pay for are dimmed. The rest unlock through research in Stage 4. |
+| Footprints (tiles) | Hub 5×5. Power Pole 1×1. Drill and Pump 2×2 (a node is 2×2). Smelter 2×2, Constructor 2×3, Foundry and Assembler 3×3, Refinery 3×4, Manufacturer 4×4. Deployer 3×3, Garage and Landing Pad 4×4. Command Post 2×2. Solar Generator 2×2, Coal and Fuel Generators 3×3. Depot 2×2. Laboratory 3×3. Gun Turret, Arc Pile and Mortar 2×2. Tunable. |
 | Placement | Every tile of the footprint must be explored ground with nothing built on it. Nodes are kept for Drills and Pumps: a Drill must line up exactly with a solid node (it snaps to the node under the cursor), a Pump with an oil node, and nothing else may cover a node. Your own units standing on the spot step aside; another player's units block it. |
-| Placing | Pick from the build menu (or 1–7), then click. The preview stays after placing, so several can be placed in a row, as in factory games; right click or Esc stops. R turns the structure a quarter turn (non-square footprints now, input and output sides from Stage 2). |
-| Build time (after Stage 1) | Placing is instant; the structure then takes a few seconds to finish and does nothing until it is finished (it matters from Stage 2). It blocks its tiles from the moment it is placed. While building it grows up out of a concrete foundation inside scaffolding, with a progress bar above it; its panel shows the percent and seconds left. Seconds: Solar Generator and Depot 3; Drill and Pump 4; Smelter, Constructor and Gun Turret 5; Command Post, Coal Generator, Arc Pile and Mortar 6; Foundry, Assembler and Fuel Generator 7; Deployer and Laboratory 8; Refinery 9; Garage and Landing Pad 10; Manufacturer 12. Tunable. Health is full from the start; whether it should grow with building is a question for Stage 3 (damage). |
-| Demolish | Your own structures except the Hub, with the panel's button or Delete, also while still being built. The full refund (SPEC) comes with costs in Stage 2. |
+| Placing | Pick from the build menu (or its key), then click. The preview stays after placing, so several can be placed in a row, as in factory games; right click or Esc stops. R turns the structure a quarter turn (four ways), which moves its ports. |
+| Build time (after Stage 1) | Placing is instant; the structure then takes a few seconds to finish and does nothing until it is finished (it matters from Stage 2). It blocks its tiles from the moment it is placed. While building it grows up out of a concrete foundation inside scaffolding, with a progress bar above it; its panel shows the percent and seconds left. Seconds: Power Pole 1; Solar Generator and Depot 3; Drill and Pump 4; Smelter, Constructor and Gun Turret 5; Command Post, Coal Generator, Arc Pile and Mortar 6; Foundry, Assembler and Fuel Generator 7; Deployer and Laboratory 8; Refinery 9; Garage and Landing Pad 10; Manufacturer 12. Tunable. Health is full from the start; whether it should grow with building is a question for Stage 3 (damage). |
+| Demolish | Your own structures except the Hub, with the panel's button or Delete, also while still being built. The full cost comes back to the Hub (SPEC), with whatever the structure held and its power lines' cost. Refunds always fit: the Hub may go past its capacity, and nothing more can be moved in until it is back under. |
 | Health | Every structure has health, shown in its panel. Damage comes in Stage 3. |
 
 ## Units (Stage 1)
@@ -103,10 +124,43 @@ Nothing is waiting on Caleb.
 | View | Isometric: a tile is a diamond 64 × 32 pixels at 100%. 100% at the start, centered on your Hub. |
 | Zoom (after Stage 1) | Smooth, from 40% to 200%. The mouse wheel and a trackpad pinch zoom toward the pointer; the on-screen buttons and the + and - keys step by 25% about the screen's center. 40% shows roughly a third of the map's width on a 1440-pixel-wide screen; the minimap shows the rest. A two-finger swipe on a trackpad also zooms, because the browser reports it the same way as a mouse wheel. |
 | Minimap (after Stage 1) | Bottom left, in the same isometric orientation as the main view, so up on the minimap is up on screen. It shows explored ground, water, cliffs and nodes (unexplored is dark), structures and units in their owner's color, and a white box for what the main view shows. Click or drag on it to move the camera there. |
-| Mouse | Left click selects a unit, structure or node; left drag selects your units in a box; Shift adds to the selection. Right click sends the selected units there (StarCraft's buttons). While building: left click places, right click stops. |
-| Keys | W A S D or the arrow keys move the camera; + and - zoom (so do the mouse wheel and a trackpad pinch); H centers on your Hub; 1–7 pick a structure; R rotates it; Delete demolishes the selected structure; Esc stops building, then clears the selection, then opens the menu. |
+| Mouse | Left click selects a unit, structure, belt or node; left drag selects your units in a box; Shift adds to the selection. Right click sends the selected units there (StarCraft's buttons). While building: left click places, right click stops. |
+| Keys | W A S D or the arrow keys move the camera; + and - zoom (so do the mouse wheel and a trackpad pinch); H centers on your Hub; 1–7, P, L, B, T and M pick from the build menu; R rotates what is being placed (and, while dragging a belt, which way it bends); Delete demolishes the selected structure or belt; Esc stops building, then clears the selection, then opens the menu. |
 | Menu | Esc or the Menu button. Single-player pauses while it is open (SPEC). Resume, Quit match, and the controls list. |
 | Fog | Unexplored tiles are drawn in a very dark navy. Explored tiles at the edge of the fog get a dark wash. Units reveal fog within their sight as they move; fog never comes back, and explored places show everything (Caleb). |
+
+## Economy (Stage 2)
+
+Recipes, extraction rates and power use follow Satisfactory, checked against the game's data (the SatisfactoryTools data file on GitHub, November 2026; satisfactory.wiki.gg is not reachable from the build environment).
+
+| Item | Choice |
+| --- | --- |
+| Items so far | Raw: Iron Ore, Copper Ore, Gold Ore, Raw Quartz, Coal, Crude Oil, Sulfur (Satisfactory's names, Gold Ore for Caterium Ore). Made: Iron Ingot, Copper Ingot, Iron Plate, Iron Rod, Screws, Wire, Cable. |
+| Recipes | Smelter: 1 Iron Ore → 1 Iron Ingot, 1 Copper Ore → 1 Copper Ingot, 2 s each. Constructor: 3 Iron Ingot → 2 Iron Plate in 6 s; 1 Iron Ingot → 1 Iron Rod in 4 s; 1 Iron Rod → 4 Screws in 6 s; 1 Copper Ingot → 2 Wire in 4 s; 2 Wire → 1 Cable in 2 s. A Smelter or Constructor makes nothing until a recipe is chosen in its panel; changing it returns what it held to the Hub. |
+| Machines | A machine takes up to 10 cycles' worth of each ingredient and holds up to 100 products; a Drill holds up to 100 ore. A full output stops it. Power: Drill 5 MW, Smelter 4 MW, Constructor 4 MW, Depot 1 MW, drawn only while working (a Depot always). |
+| Hub | Holds 2,000 items in all (SPEC: the Hub has a capacity). Belts never deliver to it (SPEC). A Depot holds 1,000. |
+| By hand | Select a structure: **To Hub** moves as many of an item as fit into the Hub, instantly, at any distance (Caleb). **Add** moves a machine's ingredient from the Hub into it. |
+| Starting inventory | 30 Iron Plate, 12 Iron Rod, 38 Wire, 6 Cable: a Drill, 4 Solar Generators, 2 Power Poles and 6 Power Lines (SPEC: enough for a Drill and some Solar Generators). |
+| Costs | Drill 10 Iron Plate + 10 Iron Rod. Smelter 40 Iron Ore. Constructor 30 Iron Ingot. Depot 10 Iron Plate + 10 Iron Rod (Satisfactory's Storage Container). Solar Generator 5 Iron Plate + 8 Wire. Power Pole 1 Iron Rod + 3 Wire (Satisfactory's, without its Concrete). Power Line 1 Cable (Satisfactory's). Belt 1 Iron Plate a tile. Splitter 2 Iron Plate + 2 Cable; Merger 2 Iron Plate + 2 Iron Rod (Satisfactory's). Deployer 20 Iron Plate + 20 Iron Rod + 40 Screws. Laboratory 40 Iron Plate + 20 Cable + 100 Screws (too much for the start, SPEC). Structures that come later have placeholder costs until their stage. |
+
+## Belts and ports (Stage 2)
+
+| Item | Choice |
+| --- | --- |
+| Ports | Each structure has input and output ports on the edge of its footprint, which turn with it. Drill: one output. Smelter, Constructor, Depot: an input on one side and an output on the opposite side. Deployer: three inputs (for unit parts, Stage 3). Ports show as arrows while building. |
+| Direct links | Two structures whose output and input ports touch and face each other pass items with no belt (Caleb, as in Satisfactory), at a belt's rate. |
+| Belts | One tile each, pointing the way items go. Drag to lay a line; it runs along one axis, then the other (R changes which first). Items move 1 tile a second, at least half a tile apart: 2 items a second, 120 a minute (Satisfactory's Mk.1 belt carries 60 a minute, but a Pure node gives 120). A belt passes items to the next belt, splitter or merger, or into an input port it points at. Belts cannot go on cliffs, nodes or structures; they can cross water (SPEC). They block ground units (Caleb). |
+| Splitter, Merger | One tile each. A splitter takes items from behind and sends them out of its front, right and left in turn, skipping a side that cannot take one. A merger takes items from behind, left and right in turn and sends them out of its front. |
+| Owners | Items only pass between things of the same owner. |
+
+## Power (Stage 2)
+
+| Item | Choice |
+| --- | --- |
+| Lines | Power Line tool (L), or Connect in a structure's panel: click a pole or structure, then another. Up to 14 tiles, center to center; not across cliffs (water is fine). A pole takes 4 lines, other structures 2. Each line costs 1 Cable, refunded when it goes. Structures and poles joined by lines form a grid. |
+| Supply | Solar Generator 4 MW, always (SPEC: no fuel, weak for its space; Satisfactory's Coal Generator makes 75 MW). Coal and Fuel Generators come in Stage 4a. |
+| Blowing | Each tick, a grid's demand is what its working structures draw. If it goes over the grid's supply, the grid blows: everything on it stops until the player restarts it with **Restart grid** in any of its structures' panels (SPEC). A grid with no generator has no power but does not blow. Joining a blown grid to a working one gives one blown grid. |
+| The Hub | Works without power. |
 
 ## Look
 
@@ -115,10 +169,11 @@ Nothing is waiting on Caleb.
 - App icon: a cream gear with a red chevron pointing up, on navy.
 - In-game colors (Caleb after Stage 1: slightly darker and grittier, like StarCraft): simplified real colors, muted and dusty, flat with navy outlines. Dusty olive ground with darker and lighter patches, bare dirt in places, tiny specks of grit, pebbles, grass tufts and small cracks; blue-grey water with paler shallows at the shore; dark grey-brown rock cliffs with grit and cracks; very dark navy fog; a dark backdrop around the map. Ores: iron rust red, copper orange with green flecks, gold yellow with a glint, quartz pale pink crystals, coal near-black, sulfur pale yellow, oil a black pool.
 - Structures are worn grey metal machines with grime toward the bottom of their walls, panel seams, and a band of the owner's color: the Hub's transmitter tower with a blinking light and rings going out (the spec says directives are sent from the Hub), a lattice-tower Drill, a glowing Smelter with a chimney, a Constructor with a moving arm, a Deployer with a hangar door, a wooden-crate Depot, a tilted Solar panel on legs, a domed Laboratory. The structures from later stages are plain boxes until they are built.
+- Belts are dark rubber between metal rails, with chevrons crawling the way they run and a bend where one joins from the side; items ride on them as small pictures (ore rocks, ingot bars, plates, rods, screws, coils). Splitters and mergers are low metal boxes with red arrows for the ways out. Power Poles are posts with a cross arm; lines are dark wires that sag a little. Machines move only while they work (the Drill's bit, the Smelter's glow, the Constructor's arm).
 - Minutemen are stick figures in the owner's color with a helmet, as in Stickman Arena, with a walking stride.
 - Player colors: Blue, Orange, Green and Purple, slightly deepened to sit with the darker colors (chosen in the lobby in Stage 6). Red is kept for the interface: selections, warnings, move markers. Single-player is Blue.
 
-## Performance (Stage 1, measured again after Caleb's Stage 1 changes)
+## Performance (measured at the end of Stage 2)
 
 Measured in headless Chromium on this build machine, 1440 × 860 screen, at normal (1×) and high (2×, as on most laptops) pixel density. It draws in software with no graphics card, so a real Chrome should do at least as well.
 
@@ -131,9 +186,11 @@ Measured in headless Chromium on this build machine, 1440 × 860 screen, at norm
 | 200% | 60 frames a second at 1× and 2×. |
 | 40% with the whole map explored, once the zoom has settled | 60 frames a second at 1× and 2×. |
 | Zooming nonstop between 40% and 100% | 1×: about 38 frames a second; 2×: about 22, while the zoom keeps changing. |
+| Belts, simulation: 2,400 belt tiles, all full | 0.16 ms a tick. |
+| Belts, drawing: about 880 belt tiles full of items on screen | 1×: 60 frames a second at 100% and 40%. 2×: 30. Belt tiles and items are stamped from cached pictures (before that, 1× was 30 and 2× 20). |
 
 How drawing keeps up:
 
-- Units are stamped from cached pictures instead of stroking every figure (20 frames a second before, 60 after, with 200 on screen).
+- Units, belt tiles and items are stamped from cached pictures instead of being drawn stroke by stroke every frame (with 200 units on screen: 20 frames a second before, 60 after).
 - Far out, the ground is drawn in cached 16 × 16 tile chunks, each with a ring of its neighbors' tiles so chunks meet without seams. While the zoom is changing, pictures from a few fixed scales are stretched; 0.2 s after it stops, the chunks and unit pictures in view are remade at the exact zoom, a few per frame. A stretched picture was 3 to 4 times slower to draw in this software-only browser (at 2×: 60 frames a second at an exact scale, 15–20 stretched).
 - Making and remaking chunks (zooming, fog lifting) is limited to about 6 ms a frame.

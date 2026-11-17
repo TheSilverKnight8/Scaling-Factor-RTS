@@ -1,9 +1,14 @@
+import type { ItemId } from './content/items';
 import { STRUCTURES, footprint, type StructureKind } from './content/structures';
+import { POWER_LINE, type TransportKind } from './content/transport';
+import { placeBelts, removeBelts, type BeltTile } from './belts';
 import { TICK_RATE } from './constants';
+import { canAfford, contents, giveFromHub, pay, refund, restartGrid, returnBag, setRecipe, takeToHub } from './economy';
 import { FP } from './fmath';
 import { findPath, nearestOpen, spreadTiles } from './path';
 import { canPlace } from './placement';
-import { type MatchState, type Unit, unitTile } from './state';
+import { canConnect, linesOf } from './power';
+import { cache, getPlayer, type MatchState, type Unit, unitTile } from './state';
 
 // Everything a player does reaches the match as a command, applied at the start of a tick.
 // In multiplayer (Stage 6) only commands travel between computers, so every action must be
@@ -12,7 +17,15 @@ import { type MatchState, type Unit, unitTile } from './state';
 export type Command =
   | { type: 'move'; player: number; units: number[]; tx: number; ty: number }
   | { type: 'build'; player: number; kind: StructureKind; x: number; y: number; rot: number }
-  | { type: 'demolish'; player: number; id: number };
+  | { type: 'demolish'; player: number; id: number }
+  | { type: 'belts'; player: number; kind: TransportKind; tiles: BeltTile[] }
+  | { type: 'removeBelts'; player: number; ids: number[] }
+  | { type: 'line'; player: number; a: number; b: number }
+  | { type: 'removeLines'; player: number; id: number }
+  | { type: 'take'; player: number; id: number; item: ItemId }
+  | { type: 'give'; player: number; id: number; item: ItemId }
+  | { type: 'recipe'; player: number; id: number; recipe: string | null }
+  | { type: 'restart'; player: number; id: number };
 
 export function applyCommand(s: MatchState, c: Command) {
   switch (c.type) {
@@ -22,10 +35,26 @@ export function applyCommand(s: MatchState, c: Command) {
       return build(s, c.player, c.kind, c.x, c.y, c.rot);
     case 'demolish':
       return demolish(s, c.player, c.id);
+    case 'belts':
+      return placeBelts(s, c.player, c.kind, c.tiles);
+    case 'removeBelts':
+      return removeBelts(s, c.player, c.ids);
+    case 'line':
+      return addLine(s, c.player, c.a, c.b);
+    case 'removeLines':
+      return removeLinesOf(s, c.player, c.id);
+    case 'take':
+      return takeToHub(s, c.player, c.id, c.item);
+    case 'give':
+      return giveFromHub(s, c.player, c.id, c.item);
+    case 'recipe':
+      return setRecipe(s, c.player, c.id, c.recipe);
+    case 'restart':
+      return restartGrid(s, c.player, c.id);
   }
 }
 
-function sendTo(s: MatchState, u: Unit, goal: number) {
+export function sendTo(s: MatchState, u: Unit, goal: number) {
   u.goal = goal;
   u.path = findPath(s, unitTile(s, u), goal);
   u.pathStep = 0;
@@ -65,17 +94,21 @@ function moveUnits(s: MatchState, player: number, ids: number[], tx: number, ty:
 }
 
 function build(s: MatchState, player: number, kind: StructureKind, x: number, y: number, rot: number) {
-  if (kind === 'hub') return;
-  if (!STRUCTURES[kind].atStart) return; // Research (Stage 4) unlocks the rest.
-  const r = rot & 1;
-  const check = canPlace(s, player, kind, x, y, r);
-  if (!check.ok) return;
+  const p = getPlayer(s, player);
+  if (!p || kind === 'hub') return;
+  const def = STRUCTURES[kind];
+  if (!def.atStart) return; // Research (Stage 4) unlocks the rest.
+  const r = ((rot % 4) + 4) % 4;
+  if (!canPlace(s, player, kind, x, y, r).ok) return;
+  if (!canAfford(p, def.cost)) return;
+  pay(p, def.cost);
   const { w, h } = footprint(kind, r);
   const id = s.nextId++;
-  const buildTotal = STRUCTURES[kind].buildSeconds * TICK_RATE;
-  s.structures.push({ id, owner: player, kind, x, y, w, h, rot: r, hp: STRUCTURES[kind].hp, buildLeft: buildTotal, buildTotal });
+  const buildTotal = def.buildSeconds * TICK_RATE;
+  s.structures.push({ id, owner: player, kind, x, y, w, h, rot: r, hp: def.hp, buildLeft: buildTotal, buildTotal, recipe: null, inv: {}, out: {}, progress: 0, status: 'building', blown: false, grid: id, rr: 0 });
   for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) s.occupied[yy * s.size + xx] = id;
   s.blockVersion++;
+  s.powerVersion++;
   // The player's own units standing there step out to the nearest open tile.
   for (const u of s.units) {
     if (u.owner !== player) continue;
@@ -91,14 +124,41 @@ function build(s: MatchState, player: number, kind: StructureKind, x: number, y:
   }
 }
 
+/** Demolishing refunds the full cost (SPEC) and returns what the structure held, to the Hub. */
 function demolish(s: MatchState, player: number, id: number) {
+  const p = getPlayer(s, player);
   const i = s.structures.findIndex((t) => t.id === id);
-  if (i < 0) return;
+  if (!p || i < 0) return;
   const t = s.structures[i];
   if (t.owner !== player || t.kind === 'hub') return;
+  refund(p, STRUCTURES[t.kind].cost);
+  returnBag(p, contents(t));
+  removeLinesOf(s, player, id);
   s.structures.splice(i, 1);
   for (let yy = t.y; yy < t.y + t.h; yy++) for (let xx = t.x; xx < t.x + t.w; xx++) s.occupied[yy * s.size + xx] = 0;
   s.blockVersion++;
+  s.powerVersion++;
 }
 
-export { sendTo };
+function addLine(s: MatchState, player: number, a: number, b: number) {
+  const p = getPlayer(s, player);
+  if (!p) return;
+  const c = cache(s);
+  if (!canConnect(s, player, c.structById.get(a), c.structById.get(b)).ok) return;
+  if (!canAfford(p, POWER_LINE.cost)) return;
+  pay(p, POWER_LINE.cost);
+  s.lines.push({ id: s.nextId++, owner: player, a, b });
+  s.powerVersion++;
+}
+
+/** Removes every power line attached to a structure, refunding each. */
+function removeLinesOf(s: MatchState, player: number, id: number) {
+  const p = getPlayer(s, player);
+  if (!p) return;
+  const mine = linesOf(s, id).filter((l) => l.owner === player);
+  if (!mine.length) return;
+  refund(p, POWER_LINE.cost, mine.length);
+  const gone = new Set(mine.map((l) => l.id));
+  s.lines = s.lines.filter((l) => !gone.has(l.id));
+  s.powerVersion++;
+}

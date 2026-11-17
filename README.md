@@ -6,18 +6,22 @@ It is an installable web app (PWA) for computers, hosted on GitHub Pages.
 
 The game is built in stages, each tried before the next starts. What the game does is in [`SPEC.md`](SPEC.md) (Caleb's spec); the stage plan and every choice left to the builder are in [`docs/decisions.md`](docs/decisions.md).
 
-## What is in it so far (Stage 1)
+## What is in it so far (Stages 1 and 2)
 
 | Area | What it does |
 | --- | --- |
 | Home | Single-player, plus Multiplayer and Settings marked for later stages. |
 | Single-player | Pick a map and start a match. Until the CPU arrives (Stage 5), you are alone on the map. |
-| The map | Basin: an island around a lake, 192 × 192 tiles, with water, cliff ridges, 60 resource nodes (seven resources, three purities) and six start locations. Isometric view. |
+| The map | Basin: an island around a lake, 192 × 192 tiles, with water, cliff ridges, 60 resource nodes (seven resources, three purities) and six start locations. Isometric view, with a minimap. |
 | Fog of war | Everything starts fogged except around your Hub. Units lift the fog for good as they explore. |
 | Units | Your Hub and 3 Minutemen. Click or drag to select, right-click to send them somewhere. |
-| Building | Pick a structure from the build menu and place it on the grid: never in fog, on water or on cliffs; a Drill goes on a node. Each structure takes a few seconds to build. Demolish your own structures. Structures do not work yet (Stage 2). |
+| The Hub | Your inventory (2,000 items). Structures are paid from it and refunded into it. Move items into it by hand from any structure's panel. |
+| Production | Drills gather ore; Smelters and Constructors run the starting iron and copper recipes (Satisfactory's); Depots store anything. Ports that touch connect directly. |
+| Transport | Belts (drag to lay a line), Splitters and Mergers. Belts block ground units and can cross water. |
+| Power | Solar Generators, Power Poles and Power Lines. A grid blows when demand goes over supply and must be restarted by hand. |
+| Building | Pick from the build menu and place on the grid: never in fog, on water or on cliffs; a Drill goes on a node. Each structure takes a few seconds to build. Demolishing refunds the full cost. |
 | Camera | W A S D or the arrow keys; zoom with the mouse wheel, a trackpad pinch, the on-screen buttons or + and -. |
-| Minimap | The whole map in the corner, with your units and structures and what the main view shows. Click it to move the camera. |
+| Minimap | The whole map in the corner, with your units, structures and belts and what the main view shows. Click it to move the camera. |
 
 The full list of controls is in the match menu (Esc).
 
@@ -35,7 +39,7 @@ npm run dev
 
 Open the address it prints (usually http://localhost:5173).
 
-To check the simulation (maps are connected, matches are deterministic, and how fast it is with 800 units):
+To check the simulation (maps are connected, matches are deterministic, the economy works from the starting inventory, and how fast it is with 800 units and thousands of belt tiles):
 
 ```bash
 npm run check:sim
@@ -54,9 +58,10 @@ To install it, open the site in Chrome or Edge on a computer and use the browser
 ```
 src/
   sim/           the simulation: deterministic, whole numbers only, changed only by commands
-  sim/content/   resources, structures and units from the spec
+  sim/content/   resources, items, recipes, structures, transport and units from the spec
   sim/map/       map building and the fixed maps
-  render/        drawing: isometric math, terrain chunks, structures, units, colors
+  sim/economy.ts, belts.ts, power.ts, flow.ts   structures at work, belts, power grids, items passing between them
+  render/        drawing: isometric math, terrain chunks, structures, units, belts, power lines, minimap, colors
   game/          running a match: the loop, camera, mouse and keyboard, the match HUD
   pages/         Home, Single-player, the match screen
   components/    page frame, buttons, cards

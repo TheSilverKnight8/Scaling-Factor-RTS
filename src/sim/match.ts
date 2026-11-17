@@ -6,7 +6,8 @@ import { getMap } from './map/maps';
 import { NODE_SIZE } from './map/types';
 import { spreadTiles } from './path';
 import { nextInt } from './rng';
-import { type MatchState, type Player, fogChunks, tileCenter } from './state';
+import { START_INVENTORY } from './content/economy';
+import { emptyCache, type MatchState, type Player, fogChunks, tileCenter } from './state';
 
 export interface MatchSetup {
   mapId: string;
@@ -33,13 +34,20 @@ export function createMatch(setup: MatchSetup): MatchState {
     map,
     size,
     occupied: new Int32Array(size * size),
+    beltAt: new Int32Array(size * size),
     nodeAt,
     blockVersion: 0,
+    transportVersion: 0,
+    powerVersion: 0,
+    gridVersion: -1,
     players: [],
     units: [],
     structures: [],
+    belts: [],
+    lines: [],
     nextId: 1,
     rng: setup.seed | 0,
+    cache: emptyCache(),
   };
 
   // Shuffle the start locations and hand them out in player order.
@@ -56,6 +64,7 @@ export function createMatch(setup: MatchSetup): MatchState {
       name: info.name,
       color: info.color,
       hubId: 0,
+      hub: { ...START_INVENTORY },
       explored: new Uint8Array(size * size),
       fogVersion: new Uint32Array(fogChunks(size)),
     };
@@ -65,7 +74,7 @@ export function createMatch(setup: MatchSetup): MatchState {
     const hx = start.x - Math.floor(hub.w / 2);
     const hy = start.y - Math.floor(hub.h / 2);
     const id = s.nextId++;
-    s.structures.push({ id, owner: p.id, kind: 'hub', x: hx, y: hy, w: hub.w, h: hub.h, rot: 0, hp: hub.hp, buildLeft: 0, buildTotal: 0 });
+    s.structures.push({ id, owner: p.id, kind: 'hub', x: hx, y: hy, w: hub.w, h: hub.h, rot: 0, hp: hub.hp, buildLeft: 0, buildTotal: 0, recipe: null, inv: {}, out: {}, progress: 0, status: 'working', blown: false, grid: id, rr: 0 });
     for (let y = hy; y < hy + hub.h; y++) for (let x = hx; x < hx + hub.w; x++) s.occupied[y * size + x] = id;
     p.hubId = id;
     reveal(s, p, start.x, start.y, HUB_SIGHT);

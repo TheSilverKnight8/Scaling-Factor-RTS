@@ -10,7 +10,9 @@ import { spreadTiles } from '../src/sim/path.ts';
 import { step } from '../src/sim/step.ts';
 import { stateHash } from '../src/sim/hash.ts';
 import type { Command } from '../src/sim/commands.ts';
-import { STRUCTURES } from '../src/sim/content/structures.ts';
+import { DX, DY, STRUCTURES, portsOf, type StructureKind } from '../src/sim/content/structures.ts';
+import { canPlace } from '../src/sim/placement.ts';
+import { canPlaceBelt } from '../src/sim/belts.ts';
 import { TICK_RATE } from '../src/sim/constants.ts';
 
 let failed = false;
@@ -129,6 +131,264 @@ else console.log(`Determinism: 1200 ticks, 4 players, identical fingerprints in 
   if (depot.buildTotal !== ticks) fail(`a Depot's build time is ${depot.buildTotal} ticks, expected ${ticks}`);
   while (depot.buildLeft > 0 && s.tick < 10000) step(s, []);
   console.log(`Build time: a Depot finished ${depot.buildTotal} ticks (${STRUCTURES.depot.buildSeconds} s) after it was placed.`);
+}
+
+// Economy: the bootstrap path from the starting inventory to Iron Plates, with ports joined directly.
+function economyRun() {
+  const s = createMatch({ mapId: 'basin', seed: 3, players: [{ name: 'A', color: 0 }] });
+  const me = s.players[0];
+  const hub = s.structures[0];
+  const run = (ticks: number, cmds: Command[] = []) => {
+    step(s, cmds);
+    for (let i = 1; i < ticks; i++) step(s, []);
+  };
+  const near = s.map.nodes
+    .filter((n) => n.resource === 'iron' && me.explored[n.y * s.size + n.x])
+    .sort((a, b) => Math.abs(a.x - hub.x) + Math.abs(a.y - hub.y) - (Math.abs(b.x - hub.x) + Math.abs(b.y - hub.y)));
+  // Find a Drill rotation and a Smelter and Constructor placement that chain port to port.
+  const chainAfter = (kind: StructureKind, from: { kind: StructureKind; x: number; y: number; rot: number }) => {
+    const out = portsOf(from.kind, from.x, from.y, from.rot).find((p) => p.io === 'out')!;
+    for (let rot = 0; rot < 4; rot++) {
+      for (const p of portsOf(kind, 0, 0, rot)) {
+        if (p.io !== 'in' || p.dir !== (out.dir + 2) % 4) continue;
+        const x = out.ox - p.x;
+        const y = out.oy - p.y;
+        if (canPlace(s, 1, kind, x, y, rot).ok) return { kind, x, y, rot };
+      }
+    }
+    return null;
+  };
+  let plan: { drill: any; smelter: any; constructor: any } | null = null;
+  for (const n of near) {
+    for (let rot = 0; rot < 4 && !plan; rot++) {
+      const drill = { kind: 'drill' as StructureKind, x: n.x, y: n.y, rot };
+      if (!canPlace(s, 1, 'drill', n.x, n.y, rot).ok) continue;
+      const smelter = chainAfter('smelter', drill);
+      if (!smelter) continue;
+      // Pretend the smelter is there to find the constructor spot.
+      const constructor = chainAfter('constructor', smelter);
+      if (constructor) plan = { drill, smelter, constructor };
+    }
+    if (plan) break;
+  }
+  if (!plan) {
+    fail('economy: found no spot for a Drill, Smelter and Constructor chain');
+    return null;
+  }
+  // Solar Generators in open explored spots near the Hub.
+  const solars: { x: number; y: number }[] = [];
+  for (let r = 6; r < 14 && solars.length < 4; r++)
+    for (let dy = -r; dy <= r && solars.length < 4; dy += 2)
+      for (let dx = -r; dx <= r && solars.length < 4; dx += 2) {
+        const x = hub.x + dx;
+        const y = hub.y + dy;
+        if (!canPlace(s, 1, 'solar', x, y, 0).ok) continue;
+        if (solars.some((o) => Math.abs(o.x - x) < 3 && Math.abs(o.y - y) < 3)) continue;
+        const busy = [plan.drill, plan.smelter, plan.constructor].some((t) => Math.abs(t.x - x) < 5 && Math.abs(t.y - y) < 5);
+        if (!busy) solars.push({ x, y });
+      }
+  run(1, [{ type: 'build', player: 1, ...plan.drill }, ...solars.map((o) => ({ type: 'build' as const, player: 1, kind: 'solar' as StructureKind, x: o.x, y: o.y, rot: 0 }))]);
+  const drill = s.structures[1];
+  // Drill to the nearest Solar, then each Solar to the next nearest.
+  const chain = [drill];
+  const left = s.structures.slice(2);
+  while (left.length) {
+    const last = chain[chain.length - 1];
+    left.sort((a, b) => (a.x - last.x) ** 2 + (a.y - last.y) ** 2 - ((b.x - last.x) ** 2 + (b.y - last.y) ** 2));
+    chain.push(left.shift()!);
+  }
+  run(1, chain.slice(1).map((t, i) => ({ type: 'line' as const, player: 1, a: chain[i].id, b: t.id })));
+  if (s.lines.length !== solars.length) fail(`economy: ${s.lines.length} power lines placed, expected ${solars.length}`);
+  run(20 * 50);
+  if ((drill.out.ironOre ?? 0) < 40) fail(`economy: the Drill gathered ${drill.out.ironOre ?? 0} ore in 50 s`);
+  run(1, [{ type: 'take', player: 1, id: drill.id, item: 'ironOre' }]);
+  run(1, [{ type: 'build', player: 1, ...plan.smelter }]);
+  const smelter = s.structures[s.structures.length - 1];
+  if (smelter.kind !== 'smelter') {
+    fail('economy: the Smelter was not built from ore');
+    return null;
+  }
+  run(1, [{ type: 'line', player: 1, a: drill.id, b: smelter.id }, { type: 'recipe', player: 1, id: smelter.id, recipe: 'ironIngot' }]);
+  // 5 s to build, then 30 ingots a minute (Satisfactory's Smelter).
+  run(20 * 70);
+  if ((smelter.out.ironIngot ?? 0) < 30) fail(`economy: the Smelter made ${smelter.out.ironIngot ?? 0} ingots`);
+  run(1, [{ type: 'take', player: 1, id: smelter.id, item: 'ironIngot' }]);
+  run(1, [{ type: 'build', player: 1, ...plan.constructor }]);
+  const constructor = s.structures[s.structures.length - 1];
+  if (constructor.kind !== 'constructor') {
+    fail('economy: the Constructor was not built from ingots');
+    return null;
+  }
+  run(1, [{ type: 'line', player: 1, a: smelter.id, b: constructor.id }, { type: 'recipe', player: 1, id: constructor.id, recipe: 'ironPlate' }]);
+  run(20 * 60);
+  // 5 s to build, then up to 20 plates a minute (Satisfactory's Constructor), fed by one Smelter.
+  const plates = constructor.out.ironPlate ?? 0;
+  if (plates < 10) fail(`economy: the Constructor made ${plates} Iron Plates in a minute`);
+  return { s, plates, hash: stateHash(s) };
+}
+const e1 = economyRun();
+const e2 = economyRun();
+if (e1 && e2) {
+  if (e1.hash !== e2.hash) fail('economy: two runs differ');
+  else console.log(`Economy: from the starting inventory, Drill -> Smelter -> Constructor joined port to port made ${e1.plates} Iron Plates in the first minute; two runs identical.`);
+}
+
+// Belts: a Drill feeding a Depot down a belt line with a splitter; and a grid that blows.
+{
+  const s = createMatch({ mapId: 'basin', seed: 3, players: [{ name: 'A', color: 0 }] });
+  const me = s.players[0];
+  me.explored.fill(1);
+  me.hub = { ironPlate: 500, ironRod: 500, wire: 500, cable: 500, ironOre: 500 };
+  const hub = s.structures[0];
+  const n = s.map.nodes.find((n) => n.resource === 'copper' && Math.abs(n.x - hub.x) + Math.abs(n.y - hub.y) < 30)!;
+  // Drill with its output facing +y, a belt line 6 tiles straight down, a splitter, then a Depot.
+  let ok = false;
+  for (let rot = 0; rot < 4 && !ok; rot++) {
+    const out = portsOf('drill', n.x, n.y, rot).find((p) => p.io === 'out')!;
+    const dir = out.dir;
+    const tiles = Array.from({ length: 6 }, (_, k) => ({ x: out.ox + DX[dir] * k, y: out.oy + DY[dir] * k, dir }));
+    if (!tiles.every((t) => canPlaceBelt(s, 1, 'belt', t.x, t.y).ok)) continue;
+    const sx = out.ox + DX[dir] * 6;
+    const sy = out.oy + DY[dir] * 6;
+    if (!canPlaceBelt(s, 1, 'splitter', sx, sy).ok) continue;
+    // A Depot whose input faces the splitter's front.
+    const dx = sx + DX[dir];
+    const dy = sy + DY[dir];
+    let depot: { x: number; y: number; rot: number } | null = null;
+    for (let r = 0; r < 4 && !depot; r++)
+      for (const p of portsOf('depot', 0, 0, r))
+        if (p.io === 'in' && p.dir === (dir + 2) % 4 && canPlace(s, 1, 'depot', dx - p.x, dy - p.y, r).ok) depot = { x: dx - p.x, y: dy - p.y, rot: r };
+    if (!depot) continue;
+    step(s, [
+      { type: 'build', player: 1, kind: 'drill', x: n.x, y: n.y, rot },
+      { type: 'belts', player: 1, kind: 'belt', tiles },
+      { type: 'belts', player: 1, kind: 'splitter', tiles: [{ x: sx, y: sy, dir }] },
+      { type: 'build', player: 1, kind: 'depot', ...depot },
+    ]);
+    ok = true;
+  }
+  if (!ok) fail('belts: found no straight line for the belt test');
+  else {
+    const [drill, depot] = [s.structures[1], s.structures[2]];
+    if (s.belts.length !== 7) fail(`belts: ${s.belts.length} belt tiles placed, expected 7`);
+    // One Solar (4 MW) cannot run a Drill (5 MW): the grid blows. Solars go in open spots near the Drill.
+    const spots: { x: number; y: number }[] = [];
+    for (let r = 3; r < 12 && spots.length < 2; r++)
+      for (let dy = -r; dy <= r && spots.length < 2; dy++)
+        for (let dx = -r; dx <= r && spots.length < 2; dx++) {
+          const x = n.x + dx;
+          const y = n.y + dy;
+          if (canPlace(s, 1, 'solar', x, y, 0).ok && !spots.some((o) => Math.abs(o.x - x) < 2 && Math.abs(o.y - y) < 2)) spots.push({ x, y });
+        }
+    step(s, [{ type: 'build', player: 1, kind: 'solar', x: spots[0].x, y: spots[0].y, rot: 0 }]);
+    const solar = s.structures[3];
+    for (let i = 0; i < 20 * 5; i++) step(s, []);
+    step(s, [{ type: 'line', player: 1, a: solar.id, b: drill.id }]);
+    for (let i = 0; i < 5; i++) step(s, []);
+    if (drill.status !== 'blown') fail(`power: a 5 MW Drill on 4 MW should blow the grid, status ${drill.status}`);
+    // Add a second Solar and the Depot, then restart.
+    step(s, [{ type: 'build', player: 1, kind: 'solar', x: spots[1].x, y: spots[1].y, rot: 0 }]);
+    const solar2 = s.structures[4];
+    for (let i = 0; i < 20 * 4; i++) step(s, []);
+    step(s, [{ type: 'line', player: 1, a: solar2.id, b: solar.id }, { type: 'line', player: 1, a: solar2.id, b: depot.id }]);
+    step(s, [{ type: 'restart', player: 1, id: drill.id }]);
+    for (let i = 0; i < 20 * 30; i++) step(s, []);
+    if (drill.status === 'blown') fail('power: still blown after a restart with enough supply');
+    const stored = depot.inv.copperOre ?? 0;
+    if (stored < 15) fail(`belts: the Depot received ${stored} Copper Ore in 30 s`);
+    else console.log(`Belts and power: one Solar on a Drill blew the grid; with two and a restart, ${stored} Copper Ore reached the Depot down 6 belt tiles and a splitter in 30 s.`);
+  }
+}
+
+// Depot output, merger turn-taking, refunds and recipe changes, on open ground with everything explored.
+{
+  const s = createMatch({ mapId: 'basin', seed: 5, players: [{ name: 'A', color: 0 }] });
+  const me = s.players[0];
+  me.explored.fill(1);
+  me.hub = { ironPlate: 500, ironRod: 500, wire: 500, cable: 500, ironOre: 500, ironIngot: 100 };
+  // Find a 14 x 10 patch of open ground.
+  let ox = -1;
+  let oy = -1;
+  for (let y = 4; y < s.size - 14 && ox < 0; y++)
+    for (let x = 4; x < s.size - 16 && ox < 0; x++) {
+      let clear = true;
+      for (let yy = y; yy < y + 10 && clear; yy++) for (let xx = x; xx < x + 14 && clear; xx++) if (!canPlaceBelt(s, 1, 'belt', xx, yy).ok || s.map.terrain[yy * s.size + xx] !== 0) clear = false;
+      if (clear) [ox, oy] = [x, y];
+    }
+  // Two Depots (rot 0: input on -y, output on +y) feed belts down into a merger, which feeds a third Depot.
+  const run = (n: number, cmds: Command[] = []) => {
+    step(s, cmds);
+    for (let i = 1; i < n; i++) step(s, []);
+  };
+  run(1, [
+    { type: 'build', player: 1, kind: 'depot', x: ox, y: oy, rot: 0 },
+    { type: 'build', player: 1, kind: 'depot', x: ox + 4, y: oy, rot: 0 },
+    { type: 'build', player: 1, kind: 'solar', x: ox + 9, y: oy, rot: 0 },
+    { type: 'build', player: 1, kind: 'solar', x: ox + 11, y: oy, rot: 0 },
+  ]);
+  const [dA, dB, s1, s2] = s.structures.slice(1);
+  // Depot A's output is at (ox, oy+2); belt down to y+4, then right to the merger at (ox+2, oy+4).
+  // Depot B's output is at (ox+4, oy+2); belt down to y+4, then left into the merger.
+  run(1, [
+    { type: 'belts', player: 1, kind: 'belt', tiles: [{ x: ox, y: oy + 2, dir: 1 }, { x: ox, y: oy + 3, dir: 1 }, { x: ox, y: oy + 4, dir: 0 }, { x: ox + 1, y: oy + 4, dir: 0 }] },
+    { type: 'belts', player: 1, kind: 'belt', tiles: [{ x: ox + 4, y: oy + 2, dir: 1 }, { x: ox + 4, y: oy + 3, dir: 1 }, { x: ox + 4, y: oy + 4, dir: 2 }, { x: ox + 3, y: oy + 4, dir: 2 }] },
+    { type: 'belts', player: 1, kind: 'merger', tiles: [{ x: ox + 2, y: oy + 4, dir: 1 }] },
+    { type: 'build', player: 1, kind: 'depot', x: ox + 2, y: oy + 5, rot: 0 },
+  ]);
+  const dC = s.structures[s.structures.length - 1];
+  run(20 * 4);
+  dA.inv = { ironOre: 50 };
+  dB.inv = { ironIngot: 50 };
+  run(1, [
+    { type: 'line', player: 1, a: s1.id, b: s2.id },
+    { type: 'line', player: 1, a: s1.id, b: dA.id },
+    { type: 'line', player: 1, a: dA.id, b: dC.id },
+    { type: 'line', player: 1, a: s2.id, b: dB.id },
+  ]);
+  // Items take about 5 s to arrive (4 belt tiles and the merger), then 2 a second, alternating.
+  run(20 * 20);
+  const ore = dC.inv.ironOre ?? 0;
+  const ingots = dC.inv.ironIngot ?? 0;
+  if (ore < 10 || ingots < 10 || Math.abs(ore - ingots) > 2) fail(`merger: the end Depot got ${ore} ore and ${ingots} ingots (both sides should take turns)`);
+  else console.log(`Depots and merger: two Depots fed one merger in turn; the end Depot got ${ore} Iron Ore and ${ingots} Iron Ingots in 20 s.`);
+
+  // Demolishing refunds the full cost and what the structure holds; a recipe change returns what it held.
+  const before = { ...me.hub };
+  run(1, [{ type: 'demolish', player: 1, id: dC.id }]);
+  const back = (me.hub.ironPlate ?? 0) - (before.ironPlate ?? 0);
+  if (back !== 10 || (me.hub.ironOre ?? 0) < (before.ironOre ?? 0) + ore) fail(`refund: demolishing a Depot returned ${back} Iron Plate (expected 10) and its contents`);
+  run(1, [{ type: 'build', player: 1, kind: 'smelter', x: ox + 7, y: oy + 6, rot: 0 }]);
+  const sm = s.structures[s.structures.length - 1];
+  run(20 * 6, [{ type: 'line', player: 1, a: s2.id, b: sm.id }]);
+  run(1, [{ type: 'recipe', player: 1, id: sm.id, recipe: 'ironIngot' }]);
+  const oreBefore = me.hub.ironOre ?? 0;
+  run(1, [{ type: 'give', player: 1, id: sm.id, item: 'ironOre' }]);
+  const given = oreBefore - (me.hub.ironOre ?? 0);
+  run(1, [{ type: 'recipe', player: 1, id: sm.id, recipe: 'copperIngot' }]);
+  if (given !== 10 || (me.hub.ironOre ?? 0) !== oreBefore) fail(`by hand: gave ${given} ore (expected 10); after a recipe change the Hub has ${me.hub.ironOre} ore, expected ${oreBefore}`);
+  else console.log('Refunds: a demolished Depot returned its cost and contents; a Smelter took 10 ore by hand and gave it back on a recipe change.');
+}
+
+// Belt load: 120 lines of 20 tiles, all full, moving.
+{
+  const s = createMatch({ mapId: 'basin', seed: 6, players: [{ name: 'A', color: 0 }] });
+  const me = s.players[0];
+  me.explored.fill(1);
+  me.hub = { ironPlate: 100000 };
+  let lines = 0;
+  for (let y = 0; y < s.size && lines < 120; y += 1) {
+    for (let x = 0; x + 20 < s.size && lines < 120; x += 22) {
+      const tiles = Array.from({ length: 20 }, (_, k) => ({ x: x + k, y, dir: 0 }));
+      if (!tiles.every((t) => canPlaceBelt(s, 1, 'belt', t.x, t.y).ok)) continue;
+      step(s, [{ type: 'belts', player: 1, kind: 'belt', tiles }]);
+      lines++;
+    }
+  }
+  for (const b of s.belts) b.items = [{ item: 'ironOre', pos: 600 }, { item: 'ironOre', pos: 0 }];
+  const t0 = performance.now();
+  for (let i = 0; i < 200; i++) step(s, []);
+  const ms = (performance.now() - t0) / 200;
+  console.log(`Belt load: ${s.belts.length} belt tiles, full, ${ms.toFixed(2)} ms a tick.`);
 }
 
 // Load: 4 players with 200 units each (the unit limit), all ordered across the map at once.

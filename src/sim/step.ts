@@ -1,5 +1,7 @@
 import { UNITS } from './content/units';
 import { applyCommand, sendTo, type Command } from './commands';
+import { tickBelts } from './belts';
+import { tickStructures } from './economy';
 import { reveal } from './fog';
 import { isqrt } from './fmath';
 import { lineClear } from './path';
@@ -7,11 +9,13 @@ import { type MatchState, type Unit, getPlayer, tileCenter, unitTile, walkable }
 
 /**
  * Advances the match by one tick: applies this tick's commands in order, advances building,
- * moves units and reveals fog. Nothing else changes the match state.
+ * runs structures (power, work, products out), moves belts, moves units and reveals fog. Nothing else changes the match state.
  */
 export function step(s: MatchState, commands: readonly Command[]) {
   for (const c of commands) applyCommand(s, c);
   for (const t of s.structures) if (t.buildLeft > 0) t.buildLeft--;
+  tickStructures(s);
+  tickBelts(s);
   for (const u of s.units) moveUnit(s, u);
   for (const u of s.units) {
     const t = unitTile(s, u);

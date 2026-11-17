@@ -1,31 +1,120 @@
-import { STRUCTURES, STRUCTURE_LIST, footprint, type StructureKind } from '../sim/content/structures';
+import { STRUCTURES, footprint, type Cost, type StructureKind } from '../sim/content/structures';
 import { UNITS } from '../sim/content/units';
 import { PURITY_NAMES, RESOURCES } from '../sim/content/resources';
+import { ITEMS, ITEM_IDS, bagTotal, type ItemId } from '../sim/content/items';
+import { RECIPES, RECIPE_LIST } from '../sim/content/recipes';
+import { HUB_CAPACITY } from '../sim/content/economy';
+import { POWER_LINE, TRANSPORT, type TransportKind } from '../sim/content/transport';
+import { canPlaceBelt, newBeltCount, type BeltTile } from '../sim/belts';
 import type { Command } from '../sim/commands';
 import { TICK_MS } from '../sim/constants';
+import { giveRoom } from '../sim/economy';
 import { FP } from '../sim/fmath';
 import { createMatch, type MatchSetup } from '../sim/match';
 import { canPlace, snapToNode } from '../sim/placement';
-import type { MatchState } from '../sim/state';
+import { canConnect, linesOf } from '../sim/power';
+import { cache, type MatchState, type Player, type StructureStatus } from '../sim/state';
 import { step } from '../sim/step';
 import { BUTTON_ZOOM, MAX_ZOOM, MIN_ZOOM, isoX, isoY, toTile } from '../render/iso';
-import { STRUCTURE_HEIGHT, structureHull } from '../render/objects';
+import { POLE_TOP, STRUCTURE_HEIGHT, structureHull, type Pt } from '../render/objects';
 import { MinimapRenderer } from '../render/minimap';
-import { Renderer, type Ghost, type Marker } from '../render/renderer';
+import { Renderer, type BeltGhost, type Ghost, type Marker } from '../render/renderer';
+import { lineAnchor } from '../render/transport';
 import { Camera } from './camera';
 
 // Runs a match on this computer: steps the simulation at a fixed rate, draws it, and turns
 // mouse and keyboard input into commands. Commands are applied at the start of the next tick.
 
-/** Structures in the build menu, in order. Number keys 1-9 pick them. */
-export const BUILD_MENU: StructureKind[] = STRUCTURE_LIST.filter((d) => d.atStart).map((d) => d.kind);
+export type ToolId = StructureKind | TransportKind | 'line';
 
-export type Selection = { kind: 'units'; ids: number[] } | { kind: 'structure'; id: number } | { kind: 'node'; id: number } | null;
+export interface BuildEntry {
+  id: ToolId;
+  name: string;
+  key: string;
+  /** The key's code (KeyboardEvent.code). */
+  code: string;
+  group: 'Production' | 'Power' | 'Transport';
+  cost: Cost;
+  /** Shown after the cost, for things paid per tile. */
+  costNote?: string;
+  blurb: string;
+}
+
+const structureEntry = (kind: StructureKind, key: string, group: BuildEntry['group']): BuildEntry => ({
+  id: kind,
+  name: STRUCTURES[kind].name,
+  key,
+  code: /^\d$/.test(key) ? `Digit${key}` : `Key${key}`,
+  group,
+  cost: STRUCTURES[kind].cost,
+  blurb: STRUCTURES[kind].blurb,
+});
+
+/** The build menu, in groups. Each has a key. */
+export const BUILD_MENU: BuildEntry[] = [
+  structureEntry('drill', '1', 'Production'),
+  structureEntry('smelter', '2', 'Production'),
+  structureEntry('constructor', '3', 'Production'),
+  structureEntry('deployer', '4', 'Production'),
+  structureEntry('depot', '5', 'Production'),
+  structureEntry('laboratory', '6', 'Production'),
+  structureEntry('solar', '7', 'Power'),
+  structureEntry('powerPole', 'P', 'Power'),
+  { id: 'line', name: POWER_LINE.name, key: 'L', code: 'KeyL', group: 'Power', cost: POWER_LINE.cost, costNote: 'each', blurb: POWER_LINE.blurb },
+  { id: 'belt', name: TRANSPORT.belt.name, key: 'B', code: 'KeyB', group: 'Transport', cost: TRANSPORT.belt.cost, costNote: 'per tile', blurb: TRANSPORT.belt.blurb },
+  { id: 'splitter', name: TRANSPORT.splitter.name, key: 'T', code: 'KeyT', group: 'Transport', cost: TRANSPORT.splitter.cost, blurb: TRANSPORT.splitter.blurb },
+  { id: 'merger', name: TRANSPORT.merger.name, key: 'M', code: 'KeyM', group: 'Transport', cost: TRANSPORT.merger.cost, blurb: TRANSPORT.merger.blurb },
+];
+
+const isTransport = (id: ToolId): id is TransportKind => id === 'belt' || id === 'splitter' || id === 'merger';
+const isStructureTool = (id: ToolId): id is StructureKind => !isTransport(id) && id !== 'line';
+
+export interface Tool {
+  id: ToolId;
+  /** Quarter turns (structures), or the direction (splitters, mergers, a single belt tile). */
+  rot: number;
+  /** Belt: where the drag started. */
+  dragFrom: { x: number; y: number } | null;
+  /** Belt: go along y first instead of x first. */
+  flip: boolean;
+  /** Power line: the structure the line starts from. */
+  lineFrom: number | null;
+}
+
+export type Selection = { kind: 'units'; ids: number[] } | { kind: 'structure'; id: number } | { kind: 'node'; id: number } | { kind: 'belt'; id: number } | null;
+
+export interface ItemCount {
+  item: ItemId;
+  name: string;
+  count: number;
+}
 
 export type SelectionInfo =
   | { kind: 'units'; count: number; groups: { name: string; count: number }[]; hp: number; maxHp: number }
-  | { kind: 'structure'; id: number; name: string; blurb: string; hp: number; maxHp: number; mine: boolean; canDemolish: boolean; building: { percent: number; secondsLeft: number } | null }
-  | { kind: 'node'; resource: string; purity: string; fluid: boolean };
+  | {
+      kind: 'structure';
+      id: number;
+      structure: StructureKind;
+      name: string;
+      blurb: string;
+      hp: number;
+      maxHp: number;
+      mine: boolean;
+      isHub: boolean;
+      canDemolish: boolean;
+      building: { percent: number; secondsLeft: number } | null;
+      status: StructureStatus;
+      statusText: string;
+      /** Smelter and Constructor: the recipes to choose from. */
+      recipes: { id: string; name: string; text: string; selected: boolean }[] | null;
+      /** What it holds, to move to the Hub by hand. */
+      contents: ItemCount[];
+      /** Ingredients it takes by hand from the Hub. */
+      needs: { item: ItemId; name: string; have: number; inHub: number; room: number }[];
+      power: { uses: number; makes: number; supply: number; demand: number; blown: boolean; lines: number; maxLines: number } | null;
+    }
+  | { kind: 'node'; resource: string; purity: string; fluid: boolean; rate: string }
+  | { kind: 'belt'; id: number; name: string; carrying: ItemCount[] };
 
 export interface HudState {
   seconds: number;
@@ -35,14 +124,64 @@ export interface HudState {
   zoomPercent: number;
   canZoomIn: boolean;
   canZoomOut: boolean;
+  hub: { items: ItemCount[]; total: number; capacity: number };
   selection: SelectionInfo | null;
-  build: { kind: StructureKind; rot: number } | null;
-  /** Why the structure under the cursor cannot be placed. */
+  tool: { id: ToolId; rot: number; lineFrom: boolean } | null;
+  /** Why the thing under the cursor cannot be placed. */
   placeError: string | null;
+  /** Which build menu entries the Hub can pay for now. */
+  affordable: Partial<Record<ToolId, boolean>>;
 }
+
+const STATUS_TEXT: Record<StructureStatus, string> = {
+  building: 'Being built.',
+  working: 'Working.',
+  idle: 'Idle.',
+  noRecipe: 'Choose a recipe.',
+  noInput: 'Waiting for ingredients.',
+  outputFull: 'Output full: take items out or connect a belt.',
+  noPower: 'No power: connect it to a generator with power lines.',
+  blown: 'Grid blown: demand went over supply. Add power, then restart it.',
+};
 
 const PAN_SPEED = 950; // screen pixels per second
 const DRAG_START = 5; // pixels before a press becomes a box selection
+const DIR_X = [1, 0, -1, 0];
+const DIR_Y = [0, 1, 0, -1];
+
+/** Belt tiles from a to b: along x then y (or y then x), each tile facing the way items go. */
+export function beltPath(ax: number, ay: number, bx: number, by: number, flip: boolean, single: number): BeltTile[] {
+  if (ax === bx && ay === by) return [{ x: ax, y: ay, dir: single }];
+  const tiles: BeltTile[] = [];
+  const legs: [number, number][] = flip
+    ? [
+        [0, by - ay],
+        [bx - ax, 0],
+      ]
+    : [
+        [bx - ax, 0],
+        [0, by - ay],
+      ];
+  let x = ax;
+  let y = ay;
+  for (const [dx, dy] of legs) {
+    const n = Math.abs(dx) + Math.abs(dy);
+    if (!n) continue;
+    const dir = dx > 0 ? 0 : dx < 0 ? 2 : dy > 0 ? 1 : 3;
+    for (let i = 0; i < n; i++) {
+      tiles.push({ x, y, dir });
+      x += DIR_X[dir];
+      y += DIR_Y[dir];
+    }
+  }
+  tiles.push({ x: bx, y: by, dir: tiles[tiles.length - 1].dir });
+  return tiles;
+}
+
+function missing(p: Player, cost: Cost, times = 1): string | null {
+  const short = cost.filter(([id, n]) => (p.hub[id] ?? 0) < n * times).map(([id, n]) => `${n * times - (p.hub[id] ?? 0)} ${ITEMS[id].name}`);
+  return short.length ? `Need ${short.join(', ')} more in the Hub.` : null;
+}
 
 export class Game {
   readonly state: MatchState;
@@ -69,18 +208,25 @@ export class Game {
   private cleanup: (() => void)[] = [];
 
   selection: Selection = null;
-  build: { kind: StructureKind; rot: number } | null = null;
+  tool: Tool | null = null;
   paused = false;
   menuOpen = false;
+  /** The build menu tab shown. */
+  group: BuildEntry['group'] = 'Production';
 
   private hud: HudState;
   private hudKey = '';
+  private hudAt = 0;
   private listeners = new Set<() => void>();
 
   constructor(setup: MatchSetup) {
     this.state = createMatch(setup);
     this.hud = this.makeHud();
     this.centerOnHub();
+  }
+
+  get player(): Player {
+    return this.state.players.find((p) => p.id === this.me)!;
   }
 
   // ------------------------------------------------------------- HUD store (React)
@@ -93,7 +239,11 @@ export class Game {
   };
   getHud = () => this.hud;
 
-  private refreshHud() {
+  /** Recomputes what the panels show: at once after an input, otherwise about 10 times a second. */
+  private refreshHud(force = true) {
+    const now = performance.now();
+    if (!force && now - this.hudAt < 100) return;
+    this.hudAt = now;
     const next = this.makeHud();
     const key = JSON.stringify(next);
     if (key === this.hudKey) return;
@@ -103,6 +253,9 @@ export class Game {
   }
 
   private makeHud(): HudState {
+    const p = this.player;
+    const affordable: Partial<Record<ToolId, boolean>> = {};
+    for (const e of BUILD_MENU) affordable[e.id] = e.cost.every(([id, n]) => (p.hub[id] ?? 0) >= n);
     return {
       seconds: Math.floor((this.state.tick * TICK_MS) / 1000),
       paused: this.paused,
@@ -110,9 +263,15 @@ export class Game {
       zoomPercent: Math.round(this.cam.zoom * 100),
       canZoomIn: this.cam.zoom < MAX_ZOOM - 1e-6,
       canZoomOut: this.cam.zoom > MIN_ZOOM + 1e-6,
+      hub: {
+        items: ITEM_IDS.filter((id) => (p.hub[id] ?? 0) > 0).map((id) => ({ item: id, name: ITEMS[id].name, count: p.hub[id]! })),
+        total: bagTotal(p.hub),
+        capacity: HUB_CAPACITY,
+      },
       selection: this.selectionInfo(),
-      build: this.build,
-      placeError: this.ghost()?.error ?? null,
+      tool: this.tool ? { id: this.tool.id, rot: this.tool.rot, lineFrom: this.tool.lineFrom !== null } : null,
+      placeError: this.preview()?.error ?? null,
+      affordable,
     };
   }
 
@@ -133,16 +292,71 @@ export class Game {
         maxHp: units.reduce((a, u) => a + UNITS[u.kind].hp, 0),
       };
     }
+    if (sel.kind === 'belt') {
+      const b = cache(s).beltById.get(sel.id);
+      if (!b) return null;
+      const counts = new Map<ItemId, number>();
+      for (const it of b.items) counts.set(it.item, (counts.get(it.item) ?? 0) + 1);
+      return { kind: 'belt', id: b.id, name: TRANSPORT[b.kind].name, carrying: [...counts].map(([item, count]) => ({ item, name: ITEMS[item].name, count })) };
+    }
     if (sel.kind === 'structure') {
-      const t = s.structures.find((x) => x.id === sel.id);
+      const t = cache(s).structById.get(sel.id);
       if (!t) return null;
       const def = STRUCTURES[t.kind];
+      const mine = t.owner === this.me;
       const building = t.buildLeft > 0 ? { percent: Math.floor((100 * (t.buildTotal - t.buildLeft)) / t.buildTotal), secondsLeft: Math.ceil((t.buildLeft * TICK_MS) / 1000) } : null;
-      return { kind: 'structure', id: t.id, name: def.name, blurb: def.blurb, hp: t.hp, maxHp: def.hp, mine: t.owner === this.me, canDemolish: t.owner === this.me && t.kind !== 'hub', building };
+      const isMachine = t.kind === 'smelter' || t.kind === 'constructor';
+      const recipes = isMachine
+        ? RECIPE_LIST.filter((r) => r.machine === t.kind && r.atStart).map((r) => ({
+            id: r.id,
+            name: r.name,
+            text: `${r.inputs.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + ')} → ${r.outputs.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + ')} in ${r.seconds} s`,
+            selected: t.recipe === r.id,
+          }))
+        : null;
+      const contents: ItemCount[] = [];
+      for (const id of ITEM_IDS) {
+        const n = (t.inv[id] ?? 0) + (t.out[id] ?? 0);
+        if (n > 0) contents.push({ item: id, name: ITEMS[id].name, count: n });
+      }
+      const p = this.player;
+      const needs = isMachine && t.recipe ? RECIPES[t.recipe].inputs.map(([id]) => ({ item: id, name: ITEMS[id].name, have: t.inv[id] ?? 0, inHub: p.hub[id] ?? 0, room: giveRoom(t, id) })) : [];
+      let power: Extract<SelectionInfo, { kind: 'structure' }>['power'] = null;
+      if (def.maxLines > 0) {
+        let supply = 0;
+        let demand = 0;
+        for (const o of s.structures) {
+          if (o.grid !== t.grid) continue;
+          const od = STRUCTURES[o.kind];
+          if (od.powerOut > 0 && o.buildLeft === 0) supply += od.powerOut;
+          if (o.status === 'working') demand += od.power;
+        }
+        power = { uses: def.power, makes: def.powerOut, supply, demand, blown: t.blown, lines: linesOf(s, t.id).length, maxLines: def.maxLines };
+      }
+      return {
+        kind: 'structure',
+        id: t.id,
+        structure: t.kind,
+        name: def.name,
+        blurb: def.blurb,
+        hp: t.hp,
+        maxHp: def.hp,
+        mine,
+        isHub: t.kind === 'hub',
+        canDemolish: mine && t.kind !== 'hub',
+        building,
+        status: t.status,
+        statusText: STATUS_TEXT[t.status],
+        recipes,
+        contents: t.kind === 'hub' ? [] : contents,
+        needs,
+        power,
+      };
     }
     const n = s.map.nodes[sel.id - 1];
     if (!n) return null;
-    return { kind: 'node', resource: RESOURCES[n.resource].name, purity: PURITY_NAMES[n.purity], fluid: RESOURCES[n.resource].fluid };
+    const perMin = [30, 60, 120][n.purity];
+    return { kind: 'node', resource: RESOURCES[n.resource].name, purity: PURITY_NAMES[n.purity], fluid: RESOURCES[n.resource].fluid, rate: `${perMin} a minute with a ${RESOURCES[n.resource].fluid ? 'Pump' : 'Drill'}` };
   }
 
   // ------------------------------------------------------------- running
@@ -212,12 +426,12 @@ export class Game {
     this.cleanSelection();
     this.draw(now);
     this.drawMinimap();
-    this.refreshHud();
+    this.refreshHud(false);
   }
 
   private draw(now: number) {
     if (!this.ctx) return;
-    const g = this.ghost();
+    const pv = this.preview();
     const sel = this.selection;
     const hover = this.hoverTarget();
     this.markers = this.markers.filter((m) => now - m.at < 600);
@@ -225,6 +439,7 @@ export class Game {
       this.lastZoom = this.cam.zoom;
       this.zoomChangedAt = now;
     }
+    const picking = !this.tool || this.tool.id === 'line';
     this.renderer.render(this.ctx, {
       state: this.state,
       me: this.me,
@@ -234,11 +449,15 @@ export class Game {
       zoomSettled: now - this.zoomChangedAt > 200,
       time: now,
       selectedUnits: new Set(sel?.kind === 'units' ? sel.ids : []),
-      selectedStructure: sel?.kind === 'structure' ? sel.id : 0,
+      selectedStructure: sel?.kind === 'structure' ? sel.id : this.tool?.lineFrom ?? 0,
       selectedNode: sel?.kind === 'node' ? sel.id : 0,
-      hoverStructure: !this.build && hover?.kind === 'structure' ? hover.id : 0,
-      hoverNode: !this.build && hover?.kind === 'node' ? hover.id : 0,
-      ghost: g?.ghost ?? null,
+      selectedBelt: sel?.kind === 'belt' ? sel.id : 0,
+      hoverStructure: picking && hover?.kind === 'structure' ? hover.id : 0,
+      hoverNode: !this.tool && hover?.kind === 'node' ? hover.id : 0,
+      ghost: pv?.ghost ?? null,
+      beltGhost: pv?.belts ?? null,
+      lineGhost: pv?.line ?? null,
+      showPorts: !!this.tool && this.tool.id !== 'line',
       drag: this.press?.dragging ? { x0: this.press.x, y0: this.press.y, x1: this.pointer.x, y1: this.pointer.y } : null,
       markers: this.markers,
     });
@@ -272,15 +491,19 @@ export class Game {
     this.cam.clamp(this.state.size);
   }
 
-  /** Units and structures that are gone drop out of the selection. */
+  /** Units, structures and belts that are gone drop out of the selection. */
   private cleanSelection() {
     const sel = this.selection;
+    const c = cache(this.state);
     if (sel?.kind === 'units') {
       const ids = sel.ids.filter((id) => this.state.units.some((u) => u.id === id));
       if (ids.length !== sel.ids.length) this.selection = ids.length ? { kind: 'units', ids } : null;
-    } else if (sel?.kind === 'structure' && !this.state.structures.some((t) => t.id === sel.id)) {
+    } else if (sel?.kind === 'structure' && !c.structById.has(sel.id)) {
+      this.selection = null;
+    } else if (sel?.kind === 'belt' && !c.beltById.has(sel.id)) {
       this.selection = null;
     }
+    if (this.tool?.lineFrom && !c.structById.has(this.tool.lineFrom)) this.tool.lineFrom = null;
   }
 
   issue(cmd: Command) {
@@ -290,8 +513,7 @@ export class Game {
   // ------------------------------------------------------------- camera
 
   centerOnHub() {
-    const me = this.state.players.find((p) => p.id === this.me);
-    const hub = this.state.structures.find((t) => t.id === me?.hubId);
+    const hub = this.state.structures.find((t) => t.id === this.player.hubId);
     if (!hub) return;
     this.cam.x = isoX(hub.x + hub.w / 2, hub.y + hub.h / 2);
     this.cam.y = isoY(hub.x + hub.w / 2, hub.y + hub.h / 2);
@@ -346,47 +568,131 @@ export class Game {
     this.refreshHud();
   }
 
-  // ------------------------------------------------------------- building
-
-  startBuild(kind: StructureKind) {
-    this.build = { kind, rot: this.build?.kind === kind ? this.build.rot : 0 };
+  setGroup(group: BuildEntry['group']) {
+    this.group = group;
     this.refreshHud();
   }
 
-  cancelBuild() {
-    this.build = null;
+  // ------------------------------------------------------------- tools
+
+  startTool(id: ToolId) {
+    const keep = this.tool?.id === id ? this.tool.rot : 0;
+    this.tool = { id, rot: keep, dragFrom: null, flip: false, lineFrom: null };
+    const entry = BUILD_MENU.find((e) => e.id === id);
+    if (entry) this.group = entry.group;
+    // Starting a power line from the selected structure.
+    if (id === 'line' && this.selection?.kind === 'structure') {
+      const t = cache(this.state).structById.get(this.selection.id);
+      if (t && t.owner === this.me && STRUCTURES[t.kind].maxLines > 0) this.tool.lineFrom = t.id;
+    }
     this.refreshHud();
   }
 
-  rotateBuild() {
-    if (this.build) this.build = { ...this.build, rot: this.build.rot ^ 1 };
+  cancelTool() {
+    this.tool = null;
     this.refreshHud();
   }
+
+  /** R: turns a structure, splitter, merger or single belt tile; while dragging a belt, changes which way it bends. */
+  rotateTool() {
+    const t = this.tool;
+    if (!t) return;
+    if (t.id === 'belt' && t.dragFrom) t.flip = !t.flip;
+    else t.rot = (t.rot + 1) % 4;
+    this.refreshHud();
+  }
+
+  /** The preview of what the current tool would place under the pointer. */
+  private preview(): { ghost?: Ghost; belts?: BeltGhost; line?: { a: Pt; b: Pt; ok: boolean }; error: string | null } | null {
+    const t = this.tool;
+    if (!t || !this.pointer.inside) return null;
+    const s = this.state;
+    const p = this.player;
+    const [fx, fy] = this.tileAt(this.pointer.x, this.pointer.y);
+    const tx = Math.floor(fx);
+    const ty = Math.floor(fy);
+    if (isStructureTool(t.id)) {
+      const kind = t.id;
+      const { w, h } = footprint(kind, t.rot);
+      let x = tx - Math.floor((w - 1) / 2);
+      let y = ty - Math.floor((h - 1) / 2);
+      const snap = snapToNode(s, kind, tx, ty);
+      if (snap) {
+        x = snap.x;
+        y = snap.y;
+      }
+      const r = canPlace(s, this.me, kind, x, y, t.rot);
+      const lack = r.ok ? missing(p, STRUCTURES[kind].cost) : null;
+      return { ghost: { kind, x, y, w, h, rot: t.rot, ok: r.ok && !lack }, error: r.ok ? lack : r.reason };
+    }
+    if (isTransport(t.id)) {
+      const tiles = t.id === 'belt' && t.dragFrom ? beltPath(t.dragFrom.x, t.dragFrom.y, tx, ty, t.flip, t.rot) : [{ x: tx, y: ty, dir: t.rot }];
+      let error: string | null = null;
+      const ghost = tiles.map((b) => {
+        const r = canPlaceBelt(s, this.me, t.id as TransportKind, b.x, b.y);
+        if (!r.ok && !error) error = r.reason;
+        return { ...b, ok: r.ok };
+      });
+      if (!error) error = missing(p, TRANSPORT[t.id].cost, newBeltCount(s, tiles));
+      return { belts: { kind: t.id, tiles: ghost }, error };
+    }
+    // Power line.
+    const hit = this.pick(this.pointer.x, this.pointer.y);
+    const target = hit?.kind === 'structure' ? cache(s).structById.get(hit.id) : undefined;
+    if (t.lineFrom === null) return { error: target && STRUCTURES[target.kind].maxLines === 0 ? `The ${STRUCTURES[target.kind].name} takes no power lines.` : null };
+    const from = cache(s).structById.get(t.lineFrom);
+    if (!from) return null;
+    const a = this.anchor(from.id)!;
+    if (!target || target.id === from.id) {
+      const [X, Y] = this.cam.toWorld(this.pointer.x, this.pointer.y);
+      return { line: { a, b: [X, Y], ok: true }, error: null };
+    }
+    const r = canConnect(s, this.me, from, target);
+    const lack = r.ok ? missing(p, POWER_LINE.cost) : null;
+    return { line: { a, b: this.anchor(target.id)!, ok: r.ok && !lack }, error: r.ok ? lack : r.reason };
+  }
+
+  private anchor(id: number): Pt | null {
+    const t = cache(this.state).structById.get(id);
+    if (!t) return null;
+    const height = t.kind === 'powerPole' ? POLE_TOP : Math.round((STRUCTURE_HEIGHT[t.kind] ?? 24) * 0.75);
+    return lineAnchor(t.x, t.y, t.w, t.h, height);
+  }
+
+  // ------------------------------------------------------------- actions from the panels
 
   demolishSelected() {
     const sel = this.selection;
+    if (sel?.kind === 'belt') {
+      this.issue({ type: 'removeBelts', player: this.me, ids: [sel.id] });
+      this.selection = null;
+      return;
+    }
     if (sel?.kind !== 'structure') return;
-    const t = this.state.structures.find((x) => x.id === sel.id);
+    const t = cache(this.state).structById.get(sel.id);
     if (!t || t.owner !== this.me || t.kind === 'hub') return;
     this.issue({ type: 'demolish', player: this.me, id: t.id });
     this.selection = null;
   }
 
-  /** The build preview under the cursor, and whether it can be placed there. */
-  private ghost(): { ghost: Ghost; error: string | null } | null {
-    if (!this.build || !this.pointer.inside) return null;
-    const [tx, ty] = this.tileAt(this.pointer.x, this.pointer.y);
-    const { kind, rot } = this.build;
-    const { w, h } = footprint(kind, rot);
-    let x = Math.floor(tx) - Math.floor((w - 1) / 2);
-    let y = Math.floor(ty) - Math.floor((h - 1) / 2);
-    const snap = snapToNode(this.state, kind, Math.floor(tx), Math.floor(ty));
-    if (snap) {
-      x = snap.x;
-      y = snap.y;
-    }
-    const r = canPlace(this.state, this.me, kind, x, y, rot);
-    return { ghost: { kind, x, y, w, h, rot, ok: r.ok }, error: r.ok ? null : r.reason };
+  takeItem(item: ItemId) {
+    if (this.selection?.kind === 'structure') this.issue({ type: 'take', player: this.me, id: this.selection.id, item });
+  }
+
+  giveItem(item: ItemId) {
+    if (this.selection?.kind === 'structure') this.issue({ type: 'give', player: this.me, id: this.selection.id, item });
+  }
+
+  chooseRecipe(recipe: string | null) {
+    if (this.selection?.kind === 'structure') this.issue({ type: 'recipe', player: this.me, id: this.selection.id, recipe });
+  }
+
+  restartGrid() {
+    if (this.selection?.kind === 'structure') this.issue({ type: 'restart', player: this.me, id: this.selection.id });
+  }
+
+  removeLines() {
+    if (this.selection?.kind === 'structure') this.issue({ type: 'removeLines', player: this.me, id: this.selection.id });
   }
 
   // ------------------------------------------------------------- picking
@@ -396,10 +702,10 @@ export class Game {
     return toTile(X, Y);
   }
 
-  /** What is under the cursor: a unit first, then a structure, then a node. */
+  /** What is under the cursor: a unit first, then a structure, then a belt, then a node. */
   private pick(sx: number, sy: number): Selection {
     const s = this.state;
-    const me = s.players.find((p) => p.id === this.me)!;
+    const me = this.player;
     const [X, Y] = this.cam.toWorld(sx, sy);
     const z = this.cam.zoom;
     let best = -1;
@@ -426,6 +732,8 @@ export class Game {
     const ix = Math.floor(tx);
     const iy = Math.floor(ty);
     if (ix >= 0 && iy >= 0 && ix < s.size && iy < s.size && me.explored[iy * s.size + ix]) {
+      const b = s.beltAt[iy * s.size + ix];
+      if (b) return { kind: 'belt', id: b };
       const n = s.nodeAt[iy * s.size + ix];
       if (n) return { kind: 'node', id: n };
     }
@@ -447,24 +755,51 @@ export class Game {
     const y = e.clientY - r.top;
     this.pointer = { x, y, inside: true };
     if (e.button === 2) {
-      // Right button: cancel building, or order the selected units to the spot.
-      if (this.build) {
-        this.cancelBuild();
+      // Right button: stop building, or order the selected units to the spot.
+      if (this.tool) {
+        this.cancelTool();
         return;
       }
       this.orderMove(x, y);
       return;
     }
     if (e.button !== 0) return;
-    if (this.build) {
-      const g = this.ghost();
-      if (g?.ghost.ok) {
-        this.issue({ type: 'build', player: this.me, kind: g.ghost.kind, x: g.ghost.x, y: g.ghost.y, rot: g.ghost.rot });
+    const t = this.tool;
+    if (t) {
+      if (t.id === 'belt') {
+        const [fx, fy] = this.tileAt(x, y);
+        t.dragFrom = { x: Math.floor(fx), y: Math.floor(fy) };
+        t.flip = false;
+        this.canvas!.setPointerCapture(e.pointerId);
+      } else if (t.id === 'line') {
+        this.clickLine(x, y);
+      } else {
+        const pv = this.preview();
+        if (pv?.ghost?.ok) this.issue({ type: 'build', player: this.me, kind: pv.ghost.kind, x: pv.ghost.x, y: pv.ghost.y, rot: pv.ghost.rot });
+        else if (pv?.belts && pv.error === null) this.issue({ type: 'belts', player: this.me, kind: pv.belts.kind, tiles: pv.belts.tiles.map(({ x: bx, y: by, dir }) => ({ x: bx, y: by, dir })) });
       }
+      this.refreshHud();
       return;
     }
     this.canvas!.setPointerCapture(e.pointerId);
     this.press = { x, y, dragging: false, shift: e.shiftKey };
+  }
+
+  private clickLine(x: number, y: number) {
+    const t = this.tool!;
+    const hit = this.pick(x, y);
+    const target = hit?.kind === 'structure' ? cache(this.state).structById.get(hit.id) : undefined;
+    if (!target || target.owner !== this.me || STRUCTURES[target.kind].maxLines === 0) return;
+    if (t.lineFrom === null || t.lineFrom === target.id) {
+      t.lineFrom = target.id;
+      return;
+    }
+    const pv = this.preview();
+    if (pv?.line?.ok) {
+      this.issue({ type: 'line', player: this.me, a: t.lineFrom, b: target.id });
+      // Carry on from the structure just connected, as when stringing poles.
+      t.lineFrom = target.id;
+    }
   }
 
   private onPointerMove(e: PointerEvent) {
@@ -474,10 +809,21 @@ export class Game {
   }
 
   private onPointerUp(e: PointerEvent) {
-    if (e.button !== 0 || !this.press) return;
+    if (e.button !== 0) return;
+    if (this.canvas?.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+    const t = this.tool;
+    if (t?.id === 'belt' && t.dragFrom) {
+      const pv = this.preview();
+      if (pv?.belts && pv.error === null) this.issue({ type: 'belts', player: this.me, kind: 'belt', tiles: pv.belts.tiles.map(({ x, y, dir }) => ({ x, y, dir })) });
+      // A single tile keeps facing the way of the last line, so the next one continues it.
+      if (pv?.belts?.tiles.length) t.rot = pv.belts.tiles[pv.belts.tiles.length - 1].dir;
+      t.dragFrom = null;
+      this.refreshHud();
+      return;
+    }
+    if (!this.press) return;
     const p = this.press;
     this.press = null;
-    if (this.canvas?.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
     if (p.dragging) this.boxSelect(p.x, p.y, this.pointer.x, this.pointer.y, p.shift);
     else this.clickSelect(p.x, p.y, p.shift);
     this.refreshHud();
@@ -503,7 +849,7 @@ export class Game {
     const ids: number[] = [];
     for (const u of this.state.units) {
       if (u.owner !== this.me) continue;
-      const [sx, sy] = this.cam.toScreen(isoX(u.x / FP, u.y / FP), isoY(u.x / FP, u.y / FP) - 12 * 1);
+      const [sx, sy] = this.cam.toScreen(isoX(u.x / FP, u.y / FP), isoY(u.x / FP, u.y / FP) - 12);
       if (sx >= lx && sx <= hx && sy >= ly - 10 && sy <= hy + 10) ids.push(u.id);
     }
     if (add && this.selection?.kind === 'units') {
@@ -533,7 +879,7 @@ export class Game {
     if (e.code === 'Escape') {
       e.preventDefault();
       if (this.menuOpen) this.setMenu(false);
-      else if (this.build) this.cancelBuild();
+      else if (this.tool) this.cancelTool();
       else if (this.selection) {
         this.selection = null;
         this.refreshHud();
@@ -549,15 +895,15 @@ export class Game {
     if (e.code === 'Equal' || e.code === 'NumpadAdd') return this.zoomStep(1);
     if (e.code === 'Minus' || e.code === 'NumpadSubtract') return this.zoomStep(-1);
     if (e.code === 'KeyH') return this.centerOnHub();
-    if (e.code === 'KeyR') return this.rotateBuild();
+    if (e.code === 'KeyR') return this.rotateTool();
     if (e.code === 'Delete' || e.code === 'Backspace') {
       e.preventDefault();
       return this.demolishSelected();
     }
-    const digit = /^Digit([1-9])$/.exec(e.code);
-    if (digit) {
-      const kind = BUILD_MENU[Number(digit[1]) - 1];
-      if (kind) this.startBuild(kind);
+    const entry = BUILD_MENU.find((b) => b.code === e.code);
+    if (entry) {
+      if (this.tool?.id === entry.id) this.cancelTool();
+      else this.startTool(entry.id);
     }
   }
 }

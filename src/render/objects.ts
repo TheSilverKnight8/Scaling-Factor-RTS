@@ -9,15 +9,15 @@ import * as C from './style';
 // Arena's, in the owner's color.
 
 type Ctx = CanvasRenderingContext2D;
-type Pt = [number, number];
+export type Pt = [number, number];
 
 const OUTLINE = 1.5;
 
 /** Heights are multiplied by this; below 1 while a structure is being built, so it grows upward. */
 let zScale = 1;
-const P = (x: number, y: number, z = 0): Pt => [isoX(x, y), isoY(x, y) - z * zScale];
+export const P = (x: number, y: number, z = 0): Pt => [isoX(x, y), isoY(x, y) - z * zScale];
 
-function poly(ctx: Ctx, pts: Pt[], fill: string | null, stroke = true) {
+export function poly(ctx: Ctx, pts: Pt[], fill: string | null, stroke = true) {
   ctx.beginPath();
   ctx.moveTo(pts[0][0], pts[0][1]);
   for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
@@ -33,7 +33,7 @@ function poly(ctx: Ctx, pts: Pt[], fill: string | null, stroke = true) {
   }
 }
 
-function line(ctx: Ctx, a: Pt, b: Pt, color = C.NAVY, width = OUTLINE) {
+export function line(ctx: Ctx, a: Pt, b: Pt, color = C.NAVY, width = OUTLINE) {
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.beginPath();
@@ -46,7 +46,7 @@ function line(ctx: Ctx, a: Pt, b: Pt, color = C.NAVY, width = OUTLINE) {
  * An upright box from (x0, y0) to (x1, y1) in tiles, from height z0 to z1. Light falls from the
  * left. Taller walls get grime toward the bottom and panel seams about a tile apart.
  */
-function box(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, z0: number, z1: number, top = C.METAL_TOP, left = C.METAL_LEFT, right = C.METAL_RIGHT) {
+export function box(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, z0: number, z1: number, top = C.METAL_TOP, left = C.METAL_LEFT, right = C.METAL_RIGHT) {
   const worn = z1 - z0 >= 8;
   const g = Math.min(7, (z1 - z0) * 0.35);
   const leftFace: Pt[] = [P(x0, y1, z1), P(x1, y1, z1), P(x1, y1, z0), P(x0, y1, z0)];
@@ -67,7 +67,7 @@ function box(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, z0: numbe
 }
 
 /** A band of the owner's color around a box's two front sides (the top stays as it is). */
-function band(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, z0: number, z1: number, color: string, dark: string) {
+export function band(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, z0: number, z1: number, color: string, dark: string) {
   poly(ctx, [P(x0, y1, z1), P(x1, y1, z1), P(x1, y1, z0), P(x0, y1, z0)], color);
   poly(ctx, [P(x1, y0, z1), P(x1, y1, z1), P(x1, y1, z0), P(x1, y0, z0)], dark);
 }
@@ -205,6 +205,8 @@ export interface StructureLook {
   dark: string;
   /** 0 to 1 while being built; left out once finished. */
   progress?: number;
+  /** Working right now: moving parts move only then. Left out: drawn still. */
+  active?: boolean;
 }
 
 /** Draws a structure standing on its footprint. */
@@ -233,8 +235,8 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
         line(ctx, P(c, b, z + 8), P(c, d, z), C.NAVY, 1.1);
       }
       box(ctx, a - 0.12, b - 0.12, c + 0.12, d + 0.12, 46, 56, s.color, s.color, s.dark);
-      // The bit turns.
-      const spin = (time / 120) % 4;
+      // The bit turns while the Drill works.
+      const spin = s.active ? (time / 120) % 4 : 0;
       const [bx, by] = P(x + w / 2, y + h / 2, 10);
       ctx.fillStyle = C.METAL_DARK;
       ctx.beginPath();
@@ -247,7 +249,7 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
       box(ctx, x + i, y + i, x1 - i, y1 - i, 0, 8, C.METAL_DARK, C.METAL_DARK, C.shade(C.METAL_DARK, 0.8));
       band(ctx, x + i, y + i, x1 - i, y1 - i, 8, 12, s.color, s.dark);
       box(ctx, x + 0.8, y + 0.8, x1 - 0.8, y1 - 0.8, 12, 36);
-      const nod = Math.sin(time / 400) * 5;
+      const nod = s.active ? Math.sin(time / 400) * 5 : 0;
       line(ctx, P(x + 0.3, y + 1, 40 + nod), P(x1 - 0.3, y + 1, 40 - nod), C.NAVY, 4);
       line(ctx, P(x + 0.3, y + 1, 40 + nod), P(x1 - 0.3, y + 1, 40 - nod), s.color, 2);
       return;
@@ -255,8 +257,8 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
     case 'smelter': {
       box(ctx, x + i, y + i, x1 - i, y1 - i, 0, 24);
       band(ctx, x + i, y + i, x1 - i, y1 - i, 20, 24, s.color, s.dark);
-      // The furnace mouth glows.
-      const glow = 0.75 + 0.25 * Math.sin(time / 300);
+      // The furnace mouth glows while the Smelter works.
+      const glow = s.active ? 0.75 + 0.25 * Math.sin(time / 300) : 0.12;
       onLeft(ctx, y1 - i, x + 0.45, x1 - 0.45, 4, 13, C.METAL_DARK);
       ctx.globalAlpha *= glow;
       onLeft(ctx, y1 - i, x + 0.55, x1 - 0.55, 5, 11, C.GLOW);
@@ -272,7 +274,7 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
       const long = h >= w;
       if (long) poly(ctx, [P(x + 0.7, y + 0.35, 20), P(x1 - 0.7, y + 0.35, 20), P(x1 - 0.7, y1 - 0.35, 20), P(x + 0.7, y1 - 0.35, 20)], C.METAL_DARK);
       else poly(ctx, [P(x + 0.35, y + 0.7, 20), P(x1 - 0.35, y + 0.7, 20), P(x1 - 0.35, y1 - 0.7, 20), P(x + 0.35, y1 - 0.7, 20)], C.METAL_DARK);
-      const sw = Math.sin(time / 500) * 0.35;
+      const sw = s.active ? Math.sin(time / 500) * 0.35 : 0;
       const base = long ? P(x + 0.35, y + h / 2 + sw, 20) : P(x + w / 2 + sw, y + 0.35, 20);
       const elbow: Pt = [base[0], base[1] - 16];
       const hand = long ? P(x + w / 2, y + h / 2 + sw, 26) : P(x + w / 2 + sw, y + h / 2, 26);
@@ -377,6 +379,27 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
       ctx.beginPath();
       ctx.ellipse(X - rx * 0.25, Y - rx * 0.35 * zScale, rx * 0.4, rx * 0.4 * zScale, 0, Math.PI * 1.1, Math.PI * 1.45);
       ctx.stroke();
+      return;
+    }
+    case 'powerPole': {
+      // A post with a cross arm and insulators, where power lines attach.
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      box(ctx, x + 0.3, y + 0.3, x1 - 0.3, y1 - 0.3, 0, 4, C.CONCRETE_TOP, C.CONCRETE_LEFT, C.CONCRETE_RIGHT);
+      box(ctx, cx - 0.07, cy - 0.07, cx + 0.07, cy + 0.07, 4, POLE_TOP, C.METAL_DARK, C.METAL_DARK, C.shade(C.METAL_DARK, 0.75));
+      const a = P(cx - 0.32, cy + 0.32, POLE_TOP - 6);
+      const b = P(cx + 0.32, cy - 0.32, POLE_TOP - 6);
+      line(ctx, a, b, C.NAVY, 4);
+      line(ctx, a, b, C.METAL_LEFT, 2);
+      for (const pt of [a, b]) {
+        ctx.fillStyle = s.color;
+        ctx.strokeStyle = C.NAVY;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(pt[0], pt[1] - 2, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
       return;
     }
     default: {
@@ -486,7 +509,10 @@ export function structureHull(x: number, y: number, w: number, h: number, height
   return [P(x, y, height), P(x + w, y, height), P(x + w, y, 0), P(x + w, y + h, 0), P(x, y + h, 0), P(x, y + h, height)];
 }
 
-export const STRUCTURE_HEIGHT: Partial<Record<StructureKind, number>> = { hub: 100, drill: 56, smelter: 50, deployer: 36, laboratory: 50, constructor: 30, depot: 25, solar: 22 };
+export const STRUCTURE_HEIGHT: Partial<Record<StructureKind, number>> = { hub: 100, drill: 56, smelter: 50, deployer: 36, laboratory: 50, constructor: 30, depot: 25, solar: 22, powerPole: 46 };
+
+/** Height of a Power Pole's cross arm, where lines attach. */
+export const POLE_TOP = 44;
 
 // ---------------------------------------------------------------- units
 

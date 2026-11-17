@@ -74,6 +74,8 @@ export class MinimapRenderer {
     ctx.strokeRect(0, 0, size, size);
 
     const colorOf = new Map(s.players.map((p) => [p.id, C.PLAYER_COLORS[p.color]]));
+    ctx.fillStyle = '#2a2824';
+    for (const b of s.belts) if (me.explored[b.y * size + b.x]) ctx.fillRect(b.x, b.y, 1, 1);
     for (const t of s.structures) {
       if (!me.explored[t.y * size + t.x]) continue;
       ctx.fillStyle = colorOf.get(t.owner)?.main ?? C.CREAM;
