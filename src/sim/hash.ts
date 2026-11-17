@@ -31,6 +31,7 @@ export function stateHash(s: MatchState): number {
     mix(t.w);
     mix(t.h);
     mix(t.hp);
+    mix(t.buildLeft);
   }
   for (const p of s.players) {
     mix(p.id);

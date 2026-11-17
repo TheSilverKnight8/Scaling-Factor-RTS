@@ -8,8 +8,9 @@ import { createMatch, type MatchSetup } from '../sim/match';
 import { canPlace, snapToNode } from '../sim/placement';
 import type { MatchState } from '../sim/state';
 import { step } from '../sim/step';
-import { isoX, isoY, toTile } from '../render/iso';
+import { BUTTON_ZOOM, MAX_ZOOM, MIN_ZOOM, isoX, isoY, toTile } from '../render/iso';
 import { STRUCTURE_HEIGHT, structureHull } from '../render/objects';
+import { MinimapRenderer } from '../render/minimap';
 import { Renderer, type Ghost, type Marker } from '../render/renderer';
 import { Camera } from './camera';
 
@@ -23,14 +24,17 @@ export type Selection = { kind: 'units'; ids: number[] } | { kind: 'structure'; 
 
 export type SelectionInfo =
   | { kind: 'units'; count: number; groups: { name: string; count: number }[]; hp: number; maxHp: number }
-  | { kind: 'structure'; id: number; name: string; blurb: string; hp: number; maxHp: number; mine: boolean; canDemolish: boolean }
+  | { kind: 'structure'; id: number; name: string; blurb: string; hp: number; maxHp: number; mine: boolean; canDemolish: boolean; building: { percent: number; secondsLeft: number } | null }
   | { kind: 'node'; resource: string; purity: string; fluid: boolean };
 
 export interface HudState {
   seconds: number;
   paused: boolean;
   menuOpen: boolean;
-  zoomIndex: number;
+  /** Zoom in percent, and whether the buttons can zoom further. */
+  zoomPercent: number;
+  canZoomIn: boolean;
+  canZoomOut: boolean;
   selection: SelectionInfo | null;
   build: { kind: StructureKind; rot: number } | null;
   /** Why the structure under the cursor cannot be placed. */
@@ -45,6 +49,9 @@ export class Game {
   readonly me = 1;
   readonly cam = new Camera();
   private renderer = new Renderer();
+  private minimap = new MinimapRenderer();
+  private minimapCanvas: HTMLCanvasElement | null = null;
+  private minimapCtx: CanvasRenderingContext2D | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private queue: Command[] = [];
@@ -56,6 +63,9 @@ export class Game {
   private pointer = { x: 0, y: 0, inside: false };
   private press: { x: number; y: number; dragging: boolean; shift: boolean } | null = null;
   private markers: Marker[] = [];
+  /** When the zoom last changed (ms); pictures are remade at the exact zoom once it settles. */
+  private zoomChangedAt = 0;
+  private lastZoom = 0;
   private cleanup: (() => void)[] = [];
 
   selection: Selection = null;
@@ -97,7 +107,9 @@ export class Game {
       seconds: Math.floor((this.state.tick * TICK_MS) / 1000),
       paused: this.paused,
       menuOpen: this.menuOpen,
-      zoomIndex: this.cam.zoomIndex,
+      zoomPercent: Math.round(this.cam.zoom * 100),
+      canZoomIn: this.cam.zoom < MAX_ZOOM - 1e-6,
+      canZoomOut: this.cam.zoom > MIN_ZOOM + 1e-6,
       selection: this.selectionInfo(),
       build: this.build,
       placeError: this.ghost()?.error ?? null,
@@ -125,7 +137,8 @@ export class Game {
       const t = s.structures.find((x) => x.id === sel.id);
       if (!t) return null;
       const def = STRUCTURES[t.kind];
-      return { kind: 'structure', id: t.id, name: def.name, blurb: def.blurb, hp: t.hp, maxHp: def.hp, mine: t.owner === this.me, canDemolish: t.owner === this.me && t.kind !== 'hub' };
+      const building = t.buildLeft > 0 ? { percent: Math.floor((100 * (t.buildTotal - t.buildLeft)) / t.buildTotal), secondsLeft: Math.ceil((t.buildLeft * TICK_MS) / 1000) } : null;
+      return { kind: 'structure', id: t.id, name: def.name, blurb: def.blurb, hp: t.hp, maxHp: def.hp, mine: t.owner === this.me, canDemolish: t.owner === this.me && t.kind !== 'hub', building };
     }
     const n = s.map.nodes[sel.id - 1];
     if (!n) return null;
@@ -150,9 +163,9 @@ export class Game {
     ro.observe(canvas);
     this.cleanup.push(() => ro.disconnect());
 
-    const on = <K extends keyof WindowEventMap>(target: Window | HTMLElement, type: K, fn: (e: WindowEventMap[K]) => void) => {
-      target.addEventListener(type, fn as EventListener);
-      this.cleanup.push(() => target.removeEventListener(type, fn as EventListener));
+    const on = <K extends keyof WindowEventMap>(target: Window | HTMLElement, type: K, fn: (e: WindowEventMap[K]) => void, opts?: AddEventListenerOptions) => {
+      target.addEventListener(type, fn as EventListener, opts);
+      this.cleanup.push(() => target.removeEventListener(type, fn as EventListener, opts));
     };
     on(window, 'keydown', (e) => this.onKeyDown(e));
     on(window, 'keyup', (e) => this.keys.delete(e.code));
@@ -164,6 +177,8 @@ export class Game {
       this.pointer.inside = false;
     });
     on(canvas, 'contextmenu', (e) => e.preventDefault());
+    // Wheel and pinch over the whole match screen (the map and the panels on it).
+    on(canvas.parentElement ?? canvas, 'wheel', (e) => this.onWheel(e as WheelEvent), { passive: false });
 
     this.last = performance.now();
     const frame = (now: number) => {
@@ -196,6 +211,7 @@ export class Game {
     }
     this.cleanSelection();
     this.draw(now);
+    this.drawMinimap();
     this.refreshHud();
   }
 
@@ -205,12 +221,17 @@ export class Game {
     const sel = this.selection;
     const hover = this.hoverTarget();
     this.markers = this.markers.filter((m) => now - m.at < 600);
+    if (this.cam.zoom !== this.lastZoom) {
+      this.lastZoom = this.cam.zoom;
+      this.zoomChangedAt = now;
+    }
     this.renderer.render(this.ctx, {
       state: this.state,
       me: this.me,
       cam: this.cam,
       dpr: this.dpr,
       alpha: this.paused ? 1 : Math.min(1, this.acc / TICK_MS),
+      zoomSettled: now - this.zoomChangedAt > 200,
       time: now,
       selectedUnits: new Set(sel?.kind === 'units' ? sel.ids : []),
       selectedStructure: sel?.kind === 'structure' ? sel.id : 0,
@@ -221,6 +242,34 @@ export class Game {
       drag: this.press?.dragging ? { x0: this.press.x, y0: this.press.y, x1: this.pointer.x, y1: this.pointer.y } : null,
       markers: this.markers,
     });
+  }
+
+  // ------------------------------------------------------------- minimap
+
+  attachMinimap(canvas: HTMLCanvasElement | null) {
+    this.minimapCanvas = canvas;
+    this.minimapCtx = canvas?.getContext('2d') ?? null;
+  }
+
+  private drawMinimap() {
+    const c = this.minimapCanvas;
+    if (!c || !this.minimapCtx) return;
+    const r = c.getBoundingClientRect();
+    const W = Math.round(r.width * this.dpr);
+    const H = Math.round(r.height * this.dpr);
+    if (c.width !== W || c.height !== H) {
+      c.width = W;
+      c.height = H;
+    }
+    this.minimap.draw(this.minimapCtx, this.state, this.me, this.cam, W, H);
+  }
+
+  /** Centers the main view on the point under (px, py) of the minimap (CSS pixels, minimap w x h). */
+  lookAtMinimap(px: number, py: number, w: number, h: number) {
+    const [X, Y] = MinimapRenderer.toWorld(px, py, w, h, this.state.size);
+    this.cam.x = X;
+    this.cam.y = Y;
+    this.cam.clamp(this.state.size);
   }
 
   /** Units and structures that are gone drop out of the selection. */
@@ -249,9 +298,27 @@ export class Game {
     this.cam.clamp(this.state.size);
   }
 
-  zoomBy(step: number) {
-    this.cam.setZoom(this.cam.zoomIndex + step);
+  /** The zoom buttons and the + and - keys: one step, about the screen's center. */
+  zoomStep(dir: 1 | -1) {
+    this.cam.zoomAt(dir > 0 ? BUTTON_ZOOM : 1 / BUTTON_ZOOM, this.cam.width / 2, this.cam.height / 2);
+    this.cam.clamp(this.state.size);
     this.refreshHud();
+  }
+
+  /**
+   * Mouse wheel and trackpad pinch: smooth zoom toward the pointer. Chrome reports a trackpad
+   * pinch as a wheel event with ctrlKey set and small steps; a mouse wheel notch is about 100.
+   */
+  private onWheel(e: WheelEvent) {
+    e.preventDefault(); // also stops the browser zooming the whole page on a pinch
+    if (this.menuOpen || !this.canvas) return;
+    let dy = e.deltaY;
+    if (e.deltaMode === 1) dy *= 16;
+    else if (e.deltaMode === 2) dy *= this.cam.height;
+    const factor = Math.max(0.5, Math.min(2, Math.exp(-dy * (e.ctrlKey ? 0.012 : 0.0015))));
+    const r = this.canvas.getBoundingClientRect();
+    this.cam.zoomAt(factor, e.clientX - r.left, e.clientY - r.top);
+    this.cam.clamp(this.state.size);
   }
 
   private panFromKeys(dt: number) {
@@ -479,8 +546,8 @@ export class Game {
       this.keys.add(e.code);
       return;
     }
-    if (e.code === 'Equal' || e.code === 'NumpadAdd') return this.zoomBy(1);
-    if (e.code === 'Minus' || e.code === 'NumpadSubtract') return this.zoomBy(-1);
+    if (e.code === 'Equal' || e.code === 'NumpadAdd') return this.zoomStep(1);
+    if (e.code === 'Minus' || e.code === 'NumpadSubtract') return this.zoomStep(-1);
     if (e.code === 'KeyH') return this.centerOnHub();
     if (e.code === 'KeyR') return this.rotateBuild();
     if (e.code === 'Delete' || e.code === 'Backspace') {

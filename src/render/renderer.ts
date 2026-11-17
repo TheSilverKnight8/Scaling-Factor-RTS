@@ -6,7 +6,7 @@ import { HH, HW, isoX, isoY, toTile } from './iso';
 import { drawMinuteman, drawNode, drawStructure, drawUnitRing, footprintPath } from './objects';
 import * as C from './style';
 import { SpriteCache } from './sprites';
-import { TerrainCache, drawTiles } from './terrain';
+import { MAX_CACHE_SCALE, TerrainCache, drawTiles } from './terrain';
 import type { StructureKind } from '../sim/content/structures';
 
 export interface Ghost {
@@ -33,6 +33,8 @@ export interface RenderView {
   dpr: number;
   /** How far between the last tick and the next one (0 to 1), for smooth movement. */
   alpha: number;
+  /** False while the zoom is changing (pictures are stretched instead of remade). */
+  zoomSettled: boolean;
   time: number;
   selectedUnits: Set<number>;
   selectedStructure: number;
@@ -85,8 +87,8 @@ export class Renderer {
       y1: Math.ceil(Math.max(...corners.map((c) => c[1]))) + 2,
     };
 
-    if (k <= 1) {
-      this.terrain.draw(ctx, s.map, me, me.fogVersion, k, cam.zoomIndex * 10 + Math.round(dpr * 4), offX, offY, view);
+    if (k <= MAX_CACHE_SCALE) {
+      this.terrain.draw(ctx, s.map, me, me.fogVersion, k, v.zoomSettled, offX, offY, view);
     } else {
       ctx.setTransform(k, 0, 0, k, offX, offY);
       drawTiles(ctx, s.map, me, view.x0, view.y0, view.x1, view.y1, 1 / k);
@@ -129,7 +131,8 @@ export class Renderer {
       const col = C.PLAYER_COLORS[owner?.color ?? 0];
       items.push({
         depth: t.x + t.y + (t.w + t.h) / 2,
-        draw: (c) => drawStructure(c, { kind: t.kind, x: t.x, y: t.y, w: t.w, h: t.h, rot: t.rot, color: col.main, dark: col.dark }, v.time),
+        draw: (c) =>
+          drawStructure(c, { kind: t.kind, x: t.x, y: t.y, w: t.w, h: t.h, rot: t.rot, color: col.main, dark: col.dark, progress: t.buildLeft > 0 ? 1 - t.buildLeft / t.buildTotal : undefined }, v.time),
       });
     }
     const colorOf = new Map(s.players.map((p) => [p.id, p.color]));
@@ -140,8 +143,8 @@ export class Renderer {
       const colorIndex = colorOf.get(u.owner) ?? 0;
       const col = C.PLAYER_COLORS[colorIndex];
       // Device pixel of the unit's feet.
-      const dx = Math.round(isoX(ux, uy) * k + offX);
-      const dy = Math.round(isoY(ux, uy) * k + offY);
+      const dx = isoX(ux, uy) * k + offX;
+      const dy = isoY(ux, uy) * k + offY;
       const facing = u.dirX - u.dirY < 0 ? -1 : 1;
       const moving = u.pathStep < u.path.length;
       // One of 8 stride pictures while walking, or standing still.
@@ -151,15 +154,10 @@ export class Renderer {
         depth: ux + uy,
         draw: (c) => {
           c.setTransform(1, 0, 0, 1, 0, 0);
-          if (selected) {
-            const ring = this.sprites.get('ring', k, RING_BOUNDS, (r) => drawUnitRing(r, 0, 0));
-            c.drawImage(ring.canvas, dx - ring.ax, dy - ring.ay);
-          }
-          const key = `${u.kind}:${colorIndex}:${facing}:${frame}`;
-          const sp = this.sprites.get(key, k, FIGURE_BOUNDS, (f) =>
+          if (selected) this.sprites.stamp(c, 'ring', k, v.zoomSettled, dx, dy, RING_BOUNDS, (r) => drawUnitRing(r, 0, 0));
+          this.sprites.stamp(c, `${u.kind}:${colorIndex}:${facing}:${frame}`, k, v.zoomSettled, dx, dy, FIGURE_BOUNDS, (f) =>
             drawMinuteman(f, 0, 0, col.main, col.dark, facing, ((frame + 0.5) / WALK_FRAMES) * Math.PI * 2, frame >= 0),
           );
-          c.drawImage(sp.canvas, dx - sp.ax, dy - sp.ay);
           c.setTransform(k, 0, 0, k, offX, offY);
         },
       });

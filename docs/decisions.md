@@ -25,16 +25,15 @@ Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortc
 | Workflow | The same as Caleb's other projects, except Noachis. |
 | Visual reference (the spec links the old shop manual; the other apps use the newer Portal look) | The Engineering Management Portal. |
 | Stage plan | Approved as proposed. |
+| Mouse wheel zoom (spec: on-screen buttons) | Yes, and pinch / spread on a trackpad. |
+| How far zoom goes out | Not too far (the farthest Stage 1 zoom showed the whole map). |
+| Minimap | Yes (Caleb first wrote "no minimap" and "minimap will be good"; asked, he chose to add one). |
+| Build time | A bit of build time, scaling with the structure. Placing is instant: no unit has to go and build it (Caleb first wrote "instant building" and "a bit of build time"; asked, he chose this). |
+| What explored areas show | Everything: once explored, a place stays fully visible, enemy units included (from Stage 3). |
+| Look | Slightly darker and grittier in-game colors, like StarCraft. |
+| Dark mode | Not necessary. Light only. |
 
-## Questions for Caleb (from Stage 1)
-
-| Question | What Stage 1 does until answered |
-| --- | --- |
-| **Mouse wheel zoom.** The spec says the player zooms with on-screen buttons. Should the mouse wheel zoom as well? | Buttons only, plus the + and - keys as shortcuts. The wheel does nothing. |
-| **Minimap.** The spec does not have one (StarCraft does). Wanted? | None. The farthest zoom (12%) shows the whole map instead. |
-| **Build time.** The spec gives structures a cost but no build time. Should structures take time to build, or appear at once? | They appear at once when placed. |
-| **What explored areas show** (matters from Stage 3). The spec says fog "is permanently lifted in explored areas". Read literally, once you have explored a place you keep seeing everything there, enemy units included, even with none of your units nearby. StarCraft instead keeps showing the ground of explored areas but hides enemy units there until one of yours is close. Which one? | Explored tiles stay lifted for good. With no enemies yet, the difference does not show. |
-| **Dark mode.** The Portal also has a dark mode; the earlier games (Stickman Arena, the Sandboxes) are light only. | Light only. |
+Nothing is waiting on Caleb.
 
 ## Builder's additions in Stage 1 (not named in the spec; easy to remove)
 
@@ -83,7 +82,8 @@ Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortc
 | Footprints (tiles) | Hub 5×5. Drill and Pump 2×2 (a node is 2×2). Smelter 2×2, Constructor 2×3, Foundry and Assembler 3×3, Refinery 3×4, Manufacturer 4×4. Deployer 3×3, Garage and Landing Pad 4×4. Command Post 2×2. Solar Generator 2×2, Coal and Fuel Generators 3×3. Depot 2×2. Laboratory 3×3. Gun Turret, Arc Pile and Mortar 2×2. Tunable. |
 | Placement | Every tile of the footprint must be explored ground with nothing built on it. Nodes are kept for Drills and Pumps: a Drill must line up exactly with a solid node (it snaps to the node under the cursor), a Pump with an oil node, and nothing else may cover a node. Your own units standing on the spot step aside; another player's units block it. |
 | Placing | Pick from the build menu (or 1–7), then click. The preview stays after placing, so several can be placed in a row, as in factory games; right click or Esc stops. R turns the structure a quarter turn (non-square footprints now, input and output sides from Stage 2). |
-| Demolish | Your own structures except the Hub, with the panel's button or Delete. The full refund (SPEC) comes with costs in Stage 2. |
+| Build time (after Stage 1) | Placing is instant; the structure then takes a few seconds to finish and does nothing until it is finished (it matters from Stage 2). It blocks its tiles from the moment it is placed. While building it grows up out of a concrete foundation inside scaffolding, with a progress bar above it; its panel shows the percent and seconds left. Seconds: Solar Generator and Depot 3; Drill and Pump 4; Smelter, Constructor and Gun Turret 5; Command Post, Coal Generator, Arc Pile and Mortar 6; Foundry, Assembler and Fuel Generator 7; Deployer and Laboratory 8; Refinery 9; Garage and Landing Pad 10; Manufacturer 12. Tunable. Health is full from the start; whether it should grow with building is a question for Stage 3 (damage). |
+| Demolish | Your own structures except the Hub, with the panel's button or Delete, also while still being built. The full refund (SPEC) comes with costs in Stage 2. |
 | Health | Every structure has health, shown in its panel. Damage comes in Stage 3. |
 
 ## Units (Stage 1)
@@ -100,30 +100,40 @@ Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortc
 
 | Item | Choice |
 | --- | --- |
-| View | Isometric: a tile is a diamond 64 × 32 pixels at 100%. Zoom levels 12%, 17%, 25%, 35%, 50%, 70%, 100%, 140%, 200%; 100% at the start, centered on your Hub. |
+| View | Isometric: a tile is a diamond 64 × 32 pixels at 100%. 100% at the start, centered on your Hub. |
+| Zoom (after Stage 1) | Smooth, from 40% to 200%. The mouse wheel and a trackpad pinch zoom toward the pointer; the on-screen buttons and the + and - keys step by 25% about the screen's center. 40% shows roughly a third of the map's width on a 1440-pixel-wide screen; the minimap shows the rest. A two-finger swipe on a trackpad also zooms, because the browser reports it the same way as a mouse wheel. |
+| Minimap (after Stage 1) | Bottom left, in the same isometric orientation as the main view, so up on the minimap is up on screen. It shows explored ground, water, cliffs and nodes (unexplored is dark), structures and units in their owner's color, and a white box for what the main view shows. Click or drag on it to move the camera there. |
 | Mouse | Left click selects a unit, structure or node; left drag selects your units in a box; Shift adds to the selection. Right click sends the selected units there (StarCraft's buttons). While building: left click places, right click stops. |
-| Keys | W A S D or the arrow keys move the camera; + and - zoom; H centers on your Hub; 1–7 pick a structure; R rotates it; Delete demolishes the selected structure; Esc stops building, then clears the selection, then opens the menu. |
+| Keys | W A S D or the arrow keys move the camera; + and - zoom (so do the mouse wheel and a trackpad pinch); H centers on your Hub; 1–7 pick a structure; R rotates it; Delete demolishes the selected structure; Esc stops building, then clears the selection, then opens the menu. |
 | Menu | Esc or the Menu button. Single-player pauses while it is open (SPEC). Resume, Quit match, and the controls list. |
-| Fog | Unexplored tiles are drawn in the app's navy. Explored tiles at the edge of the fog get a light navy wash. Units reveal fog within their sight as they move; fog never comes back. |
+| Fog | Unexplored tiles are drawn in a very dark navy. Explored tiles at the edge of the fog get a dark wash. Units reveal fog within their sight as they move; fog never comes back, and explored places show everything (Caleb). |
 
 ## Look
 
 - The Portal's style for every screen: cream, navy and red; Norwester headings; Archivo body text; staggered stripes; flat cards. Light mode only.
 - Logo: the full Croswell Industries logo on Home; the C mark in the gap left of the bottom stripes on the other screens, and in the slim stripe under a match.
 - App icon: a cream gear with a red chevron pointing up, on navy.
-- In-game colors (simplified real colors, flat, with navy outlines): grass green ground with darker and lighter patches, blue water with light shallows at the shore, grey-brown rock cliffs. Ores: iron rust red, copper orange with green flecks, gold yellow with a glint, quartz pale pink crystals, coal near-black, sulfur pale yellow, oil a black pool.
-- Structures are light metal machines with a band of the owner's color: the Hub's transmitter tower with a blinking light and rings going out (the spec says directives are sent from the Hub), a lattice-tower Drill, a glowing Smelter with a chimney, a Constructor with a moving arm, a Deployer with a hangar door, a wooden-crate Depot, a tilted Solar panel, a domed Laboratory. The structures from later stages are plain boxes until they are built.
+- In-game colors (Caleb after Stage 1: slightly darker and grittier, like StarCraft): simplified real colors, muted and dusty, flat with navy outlines. Dusty olive ground with darker and lighter patches, bare dirt in places, tiny specks of grit, pebbles, grass tufts and small cracks; blue-grey water with paler shallows at the shore; dark grey-brown rock cliffs with grit and cracks; very dark navy fog; a dark backdrop around the map. Ores: iron rust red, copper orange with green flecks, gold yellow with a glint, quartz pale pink crystals, coal near-black, sulfur pale yellow, oil a black pool.
+- Structures are worn grey metal machines with grime toward the bottom of their walls, panel seams, and a band of the owner's color: the Hub's transmitter tower with a blinking light and rings going out (the spec says directives are sent from the Hub), a lattice-tower Drill, a glowing Smelter with a chimney, a Constructor with a moving arm, a Deployer with a hangar door, a wooden-crate Depot, a tilted Solar panel on legs, a domed Laboratory. The structures from later stages are plain boxes until they are built.
 - Minutemen are stick figures in the owner's color with a helmet, as in Stickman Arena, with a walking stride.
-- Player colors: Blue, Orange, Green and Purple (chosen in the lobby in Stage 6). Red is kept for the interface: selections, warnings, move markers. Single-player is Blue.
+- Player colors: Blue, Orange, Green and Purple, slightly deepened to sit with the darker colors (chosen in the lobby in Stage 6). Red is kept for the interface: selections, warnings, move markers. Single-player is Blue.
 
-## Performance (Stage 1)
+## Performance (Stage 1, measured again after Caleb's Stage 1 changes)
 
-Measured in headless Chromium on this build machine (software drawing, no graphics card, so a real Chrome should do at least as well), 1600 × 900 screen.
+Measured in headless Chromium on this build machine, 1440 × 860 screen, at normal (1×) and high (2×, as on most laptops) pixel density. It draws in software with no graphics card, so a real Chrome should do at least as well.
 
 | Case | Result |
 | --- | --- |
-| Building Basin | About 19 ms. |
-| Simulation, 4 players × 200 units (the unit limit) walking | 0.13 ms a tick on average (worst 0.9 ms) of the 50 ms a tick has. |
-| All 800 units ordered across the map in the same tick | 100–140 ms for that one tick (varies between runs), so the game stutters once. One player ordering 200 units is about a quarter of that. If it shows in play, group orders will share one path search instead of one per unit. |
-| Drawing, 200 units walking on screen at 100% | 60 frames a second (median 16.7 ms). Units are drawn from cached pictures; before that it was 20 frames a second. |
-| Drawing at 200% (tile by tile) and at 12% (the whole map, from cached chunks) | 60 frames a second. Redrawing fog chunks is limited to about 6 ms a frame, so walking into fog does not stutter. |
+| Building Basin | About 18 ms. |
+| Simulation, 4 players × 200 units (the unit limit) walking | 0.10 ms a tick on average (worst about 1 ms) of the 50 ms a tick has. |
+| All 800 units ordered across the map in the same tick | 90–140 ms for that one tick (varies between runs), so the game stutters once. One player ordering 200 units is about a quarter of that. If it shows in play, group orders will share one path search instead of one per unit. |
+| 200 units walking into fog at 100% | 1×: 60 frames a second (56 in the 2.5 s measured). 2×: about 43 (here the ground is drawn tile by tile each frame). |
+| 200% | 60 frames a second at 1× and 2×. |
+| 40% with the whole map explored, once the zoom has settled | 60 frames a second at 1× and 2×. |
+| Zooming nonstop between 40% and 100% | 1×: about 38 frames a second; 2×: about 22, while the zoom keeps changing. |
+
+How drawing keeps up:
+
+- Units are stamped from cached pictures instead of stroking every figure (20 frames a second before, 60 after, with 200 on screen).
+- Far out, the ground is drawn in cached 16 × 16 tile chunks, each with a ring of its neighbors' tiles so chunks meet without seams. While the zoom is changing, pictures from a few fixed scales are stretched; 0.2 s after it stops, the chunks and unit pictures in view are remade at the exact zoom, a few per frame. A stretched picture was 3 to 4 times slower to draw in this software-only browser (at 2×: 60 frames a second at an exact scale, 15–20 stretched).
+- Making and remaking chunks (zooming, fog lifting) is limited to about 6 ms a frame.

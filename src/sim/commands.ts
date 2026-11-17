@@ -1,4 +1,5 @@
 import { STRUCTURES, footprint, type StructureKind } from './content/structures';
+import { TICK_RATE } from './constants';
 import { FP } from './fmath';
 import { findPath, nearestOpen, spreadTiles } from './path';
 import { canPlace } from './placement';
@@ -71,7 +72,8 @@ function build(s: MatchState, player: number, kind: StructureKind, x: number, y:
   if (!check.ok) return;
   const { w, h } = footprint(kind, r);
   const id = s.nextId++;
-  s.structures.push({ id, owner: player, kind, x, y, w, h, rot: r, hp: STRUCTURES[kind].hp });
+  const buildTotal = STRUCTURES[kind].buildSeconds * TICK_RATE;
+  s.structures.push({ id, owner: player, kind, x, y, w, h, rot: r, hp: STRUCTURES[kind].hp, buildLeft: buildTotal, buildTotal });
   for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) s.occupied[yy * s.size + xx] = id;
   s.blockVersion++;
   // The player's own units standing there step out to the nearest open tile.

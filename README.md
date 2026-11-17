@@ -15,8 +15,9 @@ The game is built in stages, each tried before the next starts. What the game do
 | The map | Basin: an island around a lake, 192 × 192 tiles, with water, cliff ridges, 60 resource nodes (seven resources, three purities) and six start locations. Isometric view. |
 | Fog of war | Everything starts fogged except around your Hub. Units lift the fog for good as they explore. |
 | Units | Your Hub and 3 Minutemen. Click or drag to select, right-click to send them somewhere. |
-| Building | Pick a structure from the build menu and place it on the grid: never in fog, on water or on cliffs; a Drill goes on a node. Demolish your own structures. Structures do not work yet (Stage 2). |
-| Camera | W A S D or the arrow keys; zoom with the on-screen buttons or + and -. |
+| Building | Pick a structure from the build menu and place it on the grid: never in fog, on water or on cliffs; a Drill goes on a node. Each structure takes a few seconds to build. Demolish your own structures. Structures do not work yet (Stage 2). |
+| Camera | W A S D or the arrow keys; zoom with the mouse wheel, a trackpad pinch, the on-screen buttons or + and -. |
+| Minimap | The whole map in the corner, with your units and structures and what the main view shows. Click it to move the camera. |
 
 The full list of controls is in the match menu (Esc).
 

@@ -6,11 +6,12 @@ import { lineClear } from './path';
 import { type MatchState, type Unit, getPlayer, tileCenter, unitTile, walkable } from './state';
 
 /**
- * Advances the match by one tick: applies this tick's commands in order, moves units and
- * reveals fog. Nothing else changes the match state.
+ * Advances the match by one tick: applies this tick's commands in order, advances building,
+ * moves units and reveals fog. Nothing else changes the match state.
  */
 export function step(s: MatchState, commands: readonly Command[]) {
   for (const c of commands) applyCommand(s, c);
+  for (const t of s.structures) if (t.buildLeft > 0) t.buildLeft--;
   for (const u of s.units) moveUnit(s, u);
   for (const u of s.units) {
     const t = unitTile(s, u);

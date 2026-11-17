@@ -35,6 +35,8 @@ export interface StructureDef {
   w: number;
   h: number;
   hp: number;
+  /** Seconds from placing to finished (Caleb: a bit of build time, scaling with the structure). */
+  buildSeconds: number;
   /** Available at the start of a match (SPEC "Research", "Available at the start"). */
   atStart: boolean;
   /** Must sit exactly on a node of this kind. */
@@ -43,27 +45,27 @@ export interface StructureDef {
 }
 
 const defs: StructureDef[] = [
-  { kind: 'hub', name: 'Hub', category: 'hub', w: 5, h: 5, hp: 5000, atStart: false, blurb: 'Your inventory and where directives are sent from. If it is destroyed, you are out.' },
-  { kind: 'drill', name: 'Drill', category: 'gatherer', w: 2, h: 2, hp: 400, atStart: true, onNode: 'solid', blurb: 'Gathers a solid resource. Placed on a node.' },
-  { kind: 'pump', name: 'Pump', category: 'gatherer', w: 2, h: 2, hp: 400, atStart: false, onNode: 'fluid', blurb: 'Gathers oil. Placed on an oil node.' },
-  { kind: 'smelter', name: 'Smelter', category: 'processor', w: 2, h: 2, hp: 400, atStart: true, blurb: 'Turns ore into ingots.' },
-  { kind: 'foundry', name: 'Foundry', category: 'processor', w: 3, h: 3, hp: 600, atStart: false, blurb: 'Combines two materials into alloys such as steel.' },
-  { kind: 'constructor', name: 'Constructor', category: 'processor', w: 2, h: 3, hp: 400, atStart: true, blurb: 'Turns one material into a part.' },
-  { kind: 'assembler', name: 'Assembler', category: 'processor', w: 3, h: 3, hp: 600, atStart: false, blurb: 'Turns two materials into a part.' },
-  { kind: 'refinery', name: 'Refinery', category: 'processor', w: 3, h: 4, hp: 600, atStart: false, blurb: 'Processes oil and other fluids.' },
-  { kind: 'manufacturer', name: 'Manufacturer', category: 'processor', w: 4, h: 4, hp: 800, atStart: false, blurb: 'Turns three or four materials into an advanced part.' },
-  { kind: 'deployer', name: 'Deployer', category: 'production', w: 3, h: 3, hp: 800, atStart: true, blurb: 'Produces infantry and the Mechanic.' },
-  { kind: 'garage', name: 'Garage', category: 'production', w: 4, h: 4, hp: 1000, atStart: false, blurb: 'Produces vehicles and the Hauler.' },
-  { kind: 'landingPad', name: 'Landing Pad', category: 'production', w: 4, h: 4, hp: 1000, atStart: false, blurb: 'Produces aircraft.' },
-  { kind: 'commandPost', name: 'Command Post', category: 'organization', w: 2, h: 2, hp: 600, atStart: false, blurb: 'Gives extra directives to units within its radius.' },
-  { kind: 'solar', name: 'Solar Generator', category: 'power', w: 2, h: 2, hp: 250, atStart: true, blurb: 'Power without fuel. Weak for the space it takes.' },
-  { kind: 'coalGenerator', name: 'Coal Generator', category: 'power', w: 3, h: 3, hp: 600, atStart: false, blurb: 'Burns coal for power.' },
-  { kind: 'fuelGenerator', name: 'Fuel Generator', category: 'power', w: 3, h: 3, hp: 600, atStart: false, blurb: 'Burns fuel for power.' },
-  { kind: 'depot', name: 'Depot', category: 'storage', w: 2, h: 2, hp: 500, atStart: true, blurb: 'Holds anything. Not connected to the Hub.' },
-  { kind: 'laboratory', name: 'Laboratory', category: 'research', w: 3, h: 3, hp: 600, atStart: true, blurb: 'Research new materials and units.' },
-  { kind: 'gunTurret', name: 'Gun Turret', category: 'defense', w: 2, h: 2, hp: 600, atStart: false, blurb: 'Fires Screws at ground targets.' },
-  { kind: 'arcPile', name: 'Arc Pile', category: 'defense', w: 2, h: 2, hp: 600, atStart: false, blurb: 'Fires electricity. Hits ground and air.' },
-  { kind: 'mortar', name: 'Mortar', category: 'defense', w: 2, h: 2, hp: 600, atStart: false, blurb: 'Long range area damage. Fires any material.' },
+  { kind: 'hub', name: 'Hub', category: 'hub', w: 5, h: 5, hp: 5000, buildSeconds: 0, atStart: false, blurb: 'Your inventory and where directives are sent from. If it is destroyed, you are out.' },
+  { kind: 'drill', name: 'Drill', category: 'gatherer', w: 2, h: 2, hp: 400, buildSeconds: 4, atStart: true, onNode: 'solid', blurb: 'Gathers a solid resource. Placed on a node.' },
+  { kind: 'pump', name: 'Pump', category: 'gatherer', w: 2, h: 2, hp: 400, buildSeconds: 4, atStart: false, onNode: 'fluid', blurb: 'Gathers oil. Placed on an oil node.' },
+  { kind: 'smelter', name: 'Smelter', category: 'processor', w: 2, h: 2, hp: 400, buildSeconds: 5, atStart: true, blurb: 'Turns ore into ingots.' },
+  { kind: 'foundry', name: 'Foundry', category: 'processor', w: 3, h: 3, hp: 600, buildSeconds: 7, atStart: false, blurb: 'Combines two materials into alloys such as steel.' },
+  { kind: 'constructor', name: 'Constructor', category: 'processor', w: 2, h: 3, hp: 400, buildSeconds: 5, atStart: true, blurb: 'Turns one material into a part.' },
+  { kind: 'assembler', name: 'Assembler', category: 'processor', w: 3, h: 3, hp: 600, buildSeconds: 7, atStart: false, blurb: 'Turns two materials into a part.' },
+  { kind: 'refinery', name: 'Refinery', category: 'processor', w: 3, h: 4, hp: 600, buildSeconds: 9, atStart: false, blurb: 'Processes oil and other fluids.' },
+  { kind: 'manufacturer', name: 'Manufacturer', category: 'processor', w: 4, h: 4, hp: 800, buildSeconds: 12, atStart: false, blurb: 'Turns three or four materials into an advanced part.' },
+  { kind: 'deployer', name: 'Deployer', category: 'production', w: 3, h: 3, hp: 800, buildSeconds: 8, atStart: true, blurb: 'Produces infantry and the Mechanic.' },
+  { kind: 'garage', name: 'Garage', category: 'production', w: 4, h: 4, hp: 1000, buildSeconds: 10, atStart: false, blurb: 'Produces vehicles and the Hauler.' },
+  { kind: 'landingPad', name: 'Landing Pad', category: 'production', w: 4, h: 4, hp: 1000, buildSeconds: 10, atStart: false, blurb: 'Produces aircraft.' },
+  { kind: 'commandPost', name: 'Command Post', category: 'organization', w: 2, h: 2, hp: 600, buildSeconds: 6, atStart: false, blurb: 'Gives extra directives to units within its radius.' },
+  { kind: 'solar', name: 'Solar Generator', category: 'power', w: 2, h: 2, hp: 250, buildSeconds: 3, atStart: true, blurb: 'Power without fuel. Weak for the space it takes.' },
+  { kind: 'coalGenerator', name: 'Coal Generator', category: 'power', w: 3, h: 3, hp: 600, buildSeconds: 6, atStart: false, blurb: 'Burns coal for power.' },
+  { kind: 'fuelGenerator', name: 'Fuel Generator', category: 'power', w: 3, h: 3, hp: 600, buildSeconds: 7, atStart: false, blurb: 'Burns fuel for power.' },
+  { kind: 'depot', name: 'Depot', category: 'storage', w: 2, h: 2, hp: 500, buildSeconds: 3, atStart: true, blurb: 'Holds anything. Not connected to the Hub.' },
+  { kind: 'laboratory', name: 'Laboratory', category: 'research', w: 3, h: 3, hp: 600, buildSeconds: 8, atStart: true, blurb: 'Research new materials and units.' },
+  { kind: 'gunTurret', name: 'Gun Turret', category: 'defense', w: 2, h: 2, hp: 600, buildSeconds: 5, atStart: false, blurb: 'Fires Screws at ground targets.' },
+  { kind: 'arcPile', name: 'Arc Pile', category: 'defense', w: 2, h: 2, hp: 600, buildSeconds: 6, atStart: false, blurb: 'Fires electricity. Hits ground and air.' },
+  { kind: 'mortar', name: 'Mortar', category: 'defense', w: 2, h: 2, hp: 600, buildSeconds: 6, atStart: false, blurb: 'Long range area damage. Fires any material.' },
 ];
 
 export const STRUCTURES = Object.fromEntries(defs.map((d) => [d.kind, d])) as Record<StructureKind, StructureDef>;

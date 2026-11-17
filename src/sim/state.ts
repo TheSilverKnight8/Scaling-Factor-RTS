@@ -57,6 +57,10 @@ export interface Structure {
   /** 0 or 1 (a quarter turn). Footprint w and h already include it. */
   rot: number;
   hp: number;
+  /** Ticks until finished; 0 once built. A structure does nothing until it is finished. */
+  buildLeft: number;
+  /** Ticks its building takes in all. */
+  buildTotal: number;
 }
 
 export interface MatchState {

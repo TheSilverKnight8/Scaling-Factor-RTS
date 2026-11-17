@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router';
 import { Menu, Minus, Plus, RotateCw, Trash2 } from 'lucide-react';
 import { STRUCTURES } from '../../sim/content/structures';
 import { unitCount } from '../../sim/content/units';
-import { ZOOMS } from '../../render/iso';
 import { Button, Kbd, cx } from '../../components/ui';
 import { BUILD_MENU, type Game } from '../Game';
+import { Minimap } from './Minimap';
 import { StructureIcon } from './StructureIcon';
 
 function Panel({ className, children }: { className?: string; children: ReactNode }) {
@@ -42,21 +42,24 @@ export function MatchHud({ game }: { game: Game }) {
           </Panel>
         )}
         <Panel className="flex items-center gap-1 p-1.5">
-          <Button size="sm" variant="ghost" onClick={() => game.zoomBy(-1)} disabled={hud.zoomIndex === 0} title="Zoom out (-)" aria-label="Zoom out">
+          <Button size="sm" variant="ghost" onClick={() => game.zoomStep(-1)} disabled={!hud.canZoomOut} title="Zoom out (-, mouse wheel or pinch)" aria-label="Zoom out">
             <Minus className="size-4" />
           </Button>
-          <span className="w-12 text-center font-mono text-sm tabular-nums">{Math.round(ZOOMS[hud.zoomIndex] * 100)}%</span>
-          <Button size="sm" variant="ghost" onClick={() => game.zoomBy(1)} disabled={hud.zoomIndex === ZOOMS.length - 1} title="Zoom in (+)" aria-label="Zoom in">
+          <span className="w-12 text-center font-mono text-sm tabular-nums">{hud.zoomPercent}%</span>
+          <Button size="sm" variant="ghost" onClick={() => game.zoomStep(1)} disabled={!hud.canZoomIn} title="Zoom in (+, mouse wheel or pinch)" aria-label="Zoom in">
             <Plus className="size-4" />
           </Button>
         </Panel>
       </div>
 
-      {/* Bottom: what is selected on the left, the build menu on the right. */}
+      {/* Bottom: the minimap and what is selected on the left, the build menu on the right. */}
       <div className="flex items-end justify-between gap-3">
-        <Panel className="w-80 p-4">
-          <SelectionPanel game={game} />
-        </Panel>
+        <div className="flex items-end gap-3">
+          <Minimap game={game} />
+          <Panel className="w-72 p-4">
+            <SelectionPanel game={game} />
+          </Panel>
+        </div>
         <Panel className="p-2">
           <div className="mb-1 flex items-center justify-between gap-3 px-1.5">
             <span className="label-caps text-muted">Build</span>
@@ -121,6 +124,16 @@ function SelectionPanel({ game }: { game: Game }) {
         <div className="label-caps text-accent">{sel.mine ? 'Your structure' : 'Structure'}</div>
         <div className="mt-1 font-display text-2xl uppercase leading-none">{sel.name}</div>
         <p className="mt-1.5 text-sm text-muted">{sel.blurb}</p>
+        {sel.building && (
+          <div className="mt-2.5">
+            <div className="h-2 overflow-hidden rounded-full bg-raised">
+              <div className="h-full rounded-full bg-accent" style={{ width: `${sel.building.percent}%` }} />
+            </div>
+            <div className="mt-1 font-mono text-[0.6875rem] text-muted">
+              Building: {sel.building.percent}%, {sel.building.secondsLeft} s left
+            </div>
+          </div>
+        )}
         <Health hp={sel.hp} max={sel.maxHp} />
         {sel.canDemolish && (
           <Button size="xs" variant="danger" className="mt-3" onClick={() => game.demolishSelected()}>
@@ -162,8 +175,10 @@ const CONTROLS: [string, string][] = [
   ['Shift + click or drag', 'Add to the selection'],
   ['Right click', 'Move the selected units there'],
   ['W A S D or arrows', 'Move the camera'],
+  ['Mouse wheel or pinch', 'Zoom in and out toward the pointer'],
   ['+ and -', 'Zoom in and out (or the buttons)'],
   ['H', 'Center on your Hub'],
+  ['Click or drag the minimap', 'Move the camera there'],
   ['1 to 7', 'Pick a structure to build'],
   ['R', 'Rotate the structure being placed'],
   ['Right click or Esc', 'Stop building'],

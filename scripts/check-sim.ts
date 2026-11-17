@@ -10,6 +10,8 @@ import { spreadTiles } from '../src/sim/path.ts';
 import { step } from '../src/sim/step.ts';
 import { stateHash } from '../src/sim/hash.ts';
 import type { Command } from '../src/sim/commands.ts';
+import { STRUCTURES } from '../src/sim/content/structures.ts';
+import { TICK_RATE } from '../src/sim/constants.ts';
 
 let failed = false;
 const fail = (msg: string) => {
@@ -121,6 +123,12 @@ else console.log(`Determinism: 1200 ticks, 4 players, identical fingerprints in 
   if (s.structures.length !== 2) fail('a Depot beside the Hub was not built');
   step(s, [{ type: 'build', player: 1, kind: 'depot', x: (hub.x + 96) % s.size, y: (hub.y + 96) % s.size, rot: 0 }]);
   if (s.structures.length !== 2) fail('a Depot in fog was built');
+  // Build time: the Depot takes STRUCTURES.depot.buildSeconds to finish.
+  const depot = s.structures[1];
+  const ticks = STRUCTURES.depot.buildSeconds * TICK_RATE;
+  if (depot.buildTotal !== ticks) fail(`a Depot's build time is ${depot.buildTotal} ticks, expected ${ticks}`);
+  while (depot.buildLeft > 0 && s.tick < 10000) step(s, []);
+  console.log(`Build time: a Depot finished ${depot.buildTotal} ticks (${STRUCTURES.depot.buildSeconds} s) after it was placed.`);
 }
 
 // Load: 4 players with 200 units each (the unit limit), all ordered across the map at once.

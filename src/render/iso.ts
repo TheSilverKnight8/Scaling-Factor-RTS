@@ -28,8 +28,11 @@ export function toTile(X: number, Y: number): [number, number] {
 }
 
 /**
- * Zoom levels, in screen pixels per world pixel. The on-screen buttons step through them. The
- * farthest shows the whole map on a computer screen (there is no minimap in the spec).
+ * Zoom limits, in screen pixels per world pixel. Zoom is smooth (mouse wheel and trackpad pinch);
+ * the on-screen buttons and the + and - keys step by BUTTON_ZOOM. Zoom-out stops well short of
+ * the whole map (Caleb: it should not zoom out too far; the minimap shows the whole map).
  */
-export const ZOOMS = [0.12, 0.17, 0.25, 0.35, 0.5, 0.7, 1, 1.4, 2];
-export const DEFAULT_ZOOM = 6;
+export const MIN_ZOOM = 0.4;
+export const MAX_ZOOM = 2;
+export const START_ZOOM = 1;
+export const BUTTON_ZOOM = 1.25;

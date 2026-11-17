@@ -13,7 +13,9 @@ type Pt = [number, number];
 
 const OUTLINE = 1.5;
 
-const P = (x: number, y: number, z = 0): Pt => [isoX(x, y), isoY(x, y) - z];
+/** Heights are multiplied by this; below 1 while a structure is being built, so it grows upward. */
+let zScale = 1;
+const P = (x: number, y: number, z = 0): Pt => [isoX(x, y), isoY(x, y) - z * zScale];
 
 function poly(ctx: Ctx, pts: Pt[], fill: string | null, stroke = true) {
   ctx.beginPath();
@@ -40,10 +42,27 @@ function line(ctx: Ctx, a: Pt, b: Pt, color = C.NAVY, width = OUTLINE) {
   ctx.stroke();
 }
 
-/** An upright box from (x0, y0) to (x1, y1) in tiles, from height z0 to z1. Light falls from the left. */
+/**
+ * An upright box from (x0, y0) to (x1, y1) in tiles, from height z0 to z1. Light falls from the
+ * left. Taller walls get grime toward the bottom and panel seams about a tile apart.
+ */
 function box(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, z0: number, z1: number, top = C.METAL_TOP, left = C.METAL_LEFT, right = C.METAL_RIGHT) {
-  poly(ctx, [P(x0, y1, z1), P(x1, y1, z1), P(x1, y1, z0), P(x0, y1, z0)], left);
-  poly(ctx, [P(x1, y0, z1), P(x1, y1, z1), P(x1, y1, z0), P(x1, y0, z0)], right);
+  const worn = z1 - z0 >= 8;
+  const g = Math.min(7, (z1 - z0) * 0.35);
+  const leftFace: Pt[] = [P(x0, y1, z1), P(x1, y1, z1), P(x1, y1, z0), P(x0, y1, z0)];
+  poly(ctx, leftFace, left, false);
+  if (worn) {
+    poly(ctx, [P(x0, y1, z0 + g), P(x1, y1, z0 + g), P(x1, y1, z0), P(x0, y1, z0)], C.GRIME, false);
+    for (let t = x0 + 1; t < x1 - 0.35; t += 1) line(ctx, P(t, y1, z0), P(t, y1, z1), C.SEAM, 1);
+  }
+  poly(ctx, leftFace, null);
+  const rightFace: Pt[] = [P(x1, y0, z1), P(x1, y1, z1), P(x1, y1, z0), P(x1, y0, z0)];
+  poly(ctx, rightFace, right, false);
+  if (worn) {
+    poly(ctx, [P(x1, y0, z0 + g), P(x1, y1, z0 + g), P(x1, y1, z0), P(x1, y0, z0)], C.GRIME, false);
+    for (let t = y0 + 1; t < y1 - 0.35; t += 1) line(ctx, P(x1, t, z0), P(x1, t, z1), C.SEAM, 1);
+  }
+  poly(ctx, rightFace, null);
   poly(ctx, [P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)], top);
 }
 
@@ -184,12 +203,15 @@ export interface StructureLook {
   rot: number;
   color: string;
   dark: string;
+  /** 0 to 1 while being built; left out once finished. */
+  progress?: number;
 }
 
 /** Draws a structure standing on its footprint. */
 export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
+  if (s.progress !== undefined && s.progress < 1) return drawConstruction(ctx, s, s.progress, time);
   const { x, y, w, h } = s;
   const x1 = x + w;
   const y1 = y + h;
@@ -292,7 +314,7 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
       return;
     }
     case 'depot': {
-      box(ctx, x + 0.2, y + 0.2, x1 - 0.2, y1 - 0.2, 0, 22, '#c9a46a', '#b08a52', '#93723f');
+      box(ctx, x + 0.2, y + 0.2, x1 - 0.2, y1 - 0.2, 0, 22, C.CRATE[0], C.CRATE[1], C.CRATE[2]);
       band(ctx, x + 0.2, y + 0.2, x1 - 0.2, y1 - 0.2, 22, 25, s.color, s.dark);
       // Cross bracing on the two front faces.
       line(ctx, P(x + 0.2, y1 - 0.2, 2), P(x1 - 0.2, y1 - 0.2, 20), C.NAVY, 1.2);
@@ -318,7 +340,7 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
         line(ctx, P(lx, ly, 0), P(lx, ly, 16), C.METAL_LEFT, 1.6);
       }
       poly(ctx, [a, b, c, d], C.SOLAR);
-      ctx.strokeStyle = '#6f9fe0';
+      ctx.strokeStyle = C.SOLAR_LINE;
       ctx.lineWidth = 1;
       for (let k = 1; k < 3; k++) {
         const t = k / 3;
@@ -343,7 +365,7 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
       const ry = 0.95 * HH * Math.SQRT2;
       ctx.beginPath();
       ctx.ellipse(X, Y, rx, ry, 0, 0, Math.PI);
-      ctx.ellipse(X, Y, rx, rx * 0.8, 0, Math.PI, Math.PI * 2);
+      ctx.ellipse(X, Y, rx, rx * 0.8 * zScale, 0, Math.PI, Math.PI * 2);
       ctx.closePath();
       ctx.fillStyle = C.GLASS;
       ctx.fill();
@@ -353,7 +375,7 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(X - rx * 0.25, Y - rx * 0.35, rx * 0.4, Math.PI * 1.1, Math.PI * 1.45);
+      ctx.ellipse(X - rx * 0.25, Y - rx * 0.35 * zScale, rx * 0.4, rx * 0.4 * zScale, 0, Math.PI * 1.1, Math.PI * 1.45);
       ctx.stroke();
       return;
     }
@@ -407,6 +429,56 @@ function drawHub(ctx: Ctx, s: StructureLook, time: number) {
   ctx.beginPath();
   ctx.ellipse(tip[0], tip[1], 6 + ring * 26, (6 + ring * 26) * 0.5, 0, 0, Math.PI * 2);
   ctx.stroke();
+}
+
+const SCAFFOLD = '#d9a227';
+
+/**
+ * A structure being built: a foundation slab, the structure growing up out of it as it nears
+ * completion, scaffolding to its current height, and a progress bar above.
+ */
+function drawConstruction(ctx: Ctx, s: StructureLook, progress: number, time: number) {
+  const { x, y, w, h } = s;
+  const x1 = x + w;
+  const y1 = y + h;
+  const height = STRUCTURE_HEIGHT[s.kind] ?? 24;
+  box(ctx, x + 0.04, y + 0.04, x1 - 0.04, y1 - 0.04, 0, 3, C.CONCRETE_TOP, C.CONCRETE_LEFT, C.CONCRETE_RIGHT);
+
+  // The finished look, squashed to the part built so far: it grows out of the foundation.
+  zScale = 0.12 + 0.88 * progress;
+  drawStructure(ctx, { ...s, progress: undefined }, time);
+  zScale = 1;
+
+  // Scaffolding poles at the three front corners, with a rail at the working height.
+  const zTop = Math.max(8, height * (0.12 + 0.88 * progress) + 4);
+  const corners: Pt[] = [P(x, y1), P(x1, y1), P(x1, y)];
+  for (const [X, Y] of corners) {
+    line(ctx, [X, Y], [X, Y - zTop], C.NAVY, 3.4);
+    line(ctx, [X, Y], [X, Y - zTop], SCAFFOLD, 1.6);
+  }
+  for (const z of [zTop * 0.5, zTop]) {
+    const a = P(x, y1, z);
+    const b = P(x1, y1, z);
+    const c = P(x1, y, z);
+    for (const [p, q] of [
+      [a, b],
+      [b, c],
+    ] as [Pt, Pt][]) {
+      line(ctx, p, q, C.NAVY, 3.2);
+      line(ctx, p, q, SCAFFOLD, 1.4);
+    }
+  }
+
+  // Progress bar.
+  const [bx, by] = P(x + w / 2, y + h / 2, height + 16);
+  const bw = 46;
+  ctx.fillStyle = C.CREAM;
+  ctx.fillRect(bx - bw / 2, by - 3, bw, 6);
+  ctx.fillStyle = C.NAVY;
+  ctx.fillRect(bx - bw / 2, by - 3, bw * progress, 6);
+  ctx.strokeStyle = C.NAVY;
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(bx - bw / 2, by - 3, bw, 6);
 }
 
 /** The outline a structure covers on screen, for picking it with the mouse: its footprint raised to its height. */

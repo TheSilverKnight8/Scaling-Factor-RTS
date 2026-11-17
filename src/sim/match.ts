@@ -65,7 +65,7 @@ export function createMatch(setup: MatchSetup): MatchState {
     const hx = start.x - Math.floor(hub.w / 2);
     const hy = start.y - Math.floor(hub.h / 2);
     const id = s.nextId++;
-    s.structures.push({ id, owner: p.id, kind: 'hub', x: hx, y: hy, w: hub.w, h: hub.h, rot: 0, hp: hub.hp });
+    s.structures.push({ id, owner: p.id, kind: 'hub', x: hx, y: hy, w: hub.w, h: hub.h, rot: 0, hp: hub.hp, buildLeft: 0, buildTotal: 0 });
     for (let y = hy; y < hy + hub.h; y++) for (let x = hx; x < hx + hub.w; x++) s.occupied[y * size + x] = id;
     p.hubId = id;
     reveal(s, p, start.x, start.y, HUB_SIGHT);

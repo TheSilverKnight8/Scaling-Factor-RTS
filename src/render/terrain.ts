@@ -20,19 +20,31 @@ function diamond(ctx: Ctx, x: number, y: number) {
   ctx.closePath();
 }
 
-/** Smooth patches for the grass shade (drawing only, so ordinary floating point is fine). */
-function patch(x: number, y: number) {
-  const s = 7;
-  const gx = x / s;
-  const gy = y / s;
+/** Smooth patches (drawing only, so ordinary floating point is fine). 0 to 1. */
+function patch(x: number, y: number, scale = 7, seed = 991) {
+  const gx = x / scale;
+  const gy = y / scale;
   const x0 = Math.floor(gx);
   const y0 = Math.floor(gy);
   const tx = gx - x0;
   const ty = gy - y0;
-  const v = (a: number, b: number) => (hash2(a, b, 991) & 0xffff) / 65535;
+  const v = (a: number, b: number) => (hash2(a, b, seed) & 0xffff) / 65535;
   const a = v(x0, y0) + (v(x0 + 1, y0) - v(x0, y0)) * tx;
   const b = v(x0, y0 + 1) + (v(x0 + 1, y0 + 1) - v(x0, y0 + 1)) * tx;
   return a + (b - a) * ty;
+}
+
+/** Tiny specks scattered over a tile, the same every time for a given tile: the grit. */
+function grit(ctx: Ctx, x: number, y: number, count: number, salt: number) {
+  let h = hash2(x, y, salt);
+  for (let i = 0; i < count; i++) {
+    const u = 0.12 + ((h & 0xff) / 255) * 0.76;
+    const v = 0.12 + (((h >>> 8) & 0xff) / 255) * 0.76;
+    const size = 1.2 + ((h >>> 16) & 3) * 0.45;
+    ctx.fillStyle = (h >>> 18) & 1 ? C.GRIT_DARK : C.GRIT_LIGHT;
+    ctx.fillRect(isoX(x + u, y + v) - size / 2, isoY(x + u, y + v) - size / 2, size, size * 0.7);
+    h = hash2(h, i, salt + 1);
+  }
 }
 
 export interface FogView {
@@ -145,16 +157,23 @@ function drawFog(ctx: Ctx, x: number, y: number, v: number, px: number) {
 }
 
 function drawGround(ctx: Ctx, m: MapData, x: number, y: number) {
+  // Bare dirt in some places, darker and lighter grass in others.
+  const dirt = patch(x, y, 9, 5113);
   const p = patch(x, y);
-  if (p < 0.3 || p > 0.72) {
+  let fill: string | null = null;
+  if (dirt > 0.8) fill = dirt > 0.88 ? C.DIRT_DARK : C.DIRT;
+  else if (p < 0.3) fill = C.GROUND_DARK;
+  else if (p > 0.72) fill = C.GROUND_LIGHT;
+  if (fill) {
     diamond(ctx, x, y);
-    ctx.fillStyle = p < 0.3 ? C.GROUND_DARK : C.GROUND_LIGHT;
+    ctx.fillStyle = fill;
     ctx.fill();
   }
+  grit(ctx, x, y, 5, 77);
   const v = m.variant[y * m.size + x];
   const X = isoX(x + 0.5, y + 0.5);
   const Y = isoY(x + 0.5, y + 0.5);
-  if (v < 24) {
+  if (v < 22 && dirt <= 0.8) {
     // A grass tuft.
     const ox = ((v * 7) % 17) - 8;
     const oy = ((v * 5) % 9) - 4;
@@ -167,7 +186,7 @@ function drawGround(ctx: Ctx, m: MapData, x: number, y: number) {
     ctx.lineTo(X + ox + 2, Y + oy + 1);
     ctx.lineTo(X + ox + 4, Y + oy - 3);
     ctx.stroke();
-  } else if (v < 31) {
+  } else if (v < 32) {
     // A pebble.
     const ox = ((v * 11) % 21) - 10;
     const oy = ((v * 3) % 9) - 4;
@@ -177,6 +196,17 @@ function drawGround(ctx: Ctx, m: MapData, x: number, y: number) {
     ctx.beginPath();
     ctx.ellipse(X + ox, Y + oy, 3.2, 2, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
+  } else if (v < 44) {
+    // A small crack in the ground.
+    const o = (v % 7) - 3;
+    ctx.strokeStyle = C.CRACK;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(X - 9 + o, Y + 2);
+    ctx.lineTo(X - 3 + o, Y - 1);
+    ctx.lineTo(X + 1 + o, Y + 3);
+    ctx.lineTo(X + 8 + o, Y);
     ctx.stroke();
   }
 }
@@ -275,7 +305,11 @@ function drawCliff(ctx: Ctx, m: MapData, x: number, y: number) {
   if (!isCliff(m, x - 1, y)) edge(P(x, y, H), P(x, y + 1, H));
   if (frontRight) edge(P(x + 1, y, H), P(x + 1, y + 1, H));
   if (frontLeft) edge(P(x, y + 1, H), P(x + 1, y + 1, H));
-  // A few cracks so rock reads as rock.
+  // Grit and a few cracks so rock reads as rock.
+  ctx.save();
+  ctx.translate(0, -H);
+  grit(ctx, x, y, 6, 313);
+  ctx.restore();
   const v = m.variant[y * m.size + x];
   if (v < 90) {
     const [cx, cy] = P(x + 0.5, y + 0.5, H);
@@ -293,9 +327,10 @@ function drawCliff(ctx: Ctx, m: MapData, x: number, y: number) {
 /** One cached chunk picture. */
 interface ChunkPic {
   canvas: HTMLCanvasElement;
-  /** Device pixel of the picture's left/top edge, relative to world (0, 0) at this scale. */
+  /** Device pixel of the picture's left/top edge, relative to world (0, 0), at the picture's scale. */
   ox: number;
   oy: number;
+  scale: number;
   version: number;
   bytes: number;
 }
@@ -304,60 +339,78 @@ const PAD = 4;
 const EXTRA_BOTTOM = 26;
 
 /**
- * Far-out terrain drawing: one picture per 16 x 16 tile chunk, made at the current scale.
- * Pictures are kept least recently used first, up to about 200 MB.
+ * The scales chunk pictures are made at while the zoom is changing (device pixels per world
+ * pixel): the nearest one at or above the current scale, shrunk to fit, so smooth zooming reuses
+ * pictures instead of making new ones every frame. Once the zoom has settled, pictures are remade
+ * at the exact scale, because drawing a picture shrunk is slow where the browser draws without a
+ * graphics card. Above the largest scale, tiles are drawn directly.
+ */
+export const CACHE_SCALES = [0.25, 0.3536, 0.5, 0.7071, 1, 1.4142];
+export const MAX_CACHE_SCALE = CACHE_SCALES[CACHE_SCALES.length - 1];
+
+function cacheScale(k: number) {
+  for (const s of CACHE_SCALES) if (s >= k - 1e-6) return s;
+  return MAX_CACHE_SCALE;
+}
+
+/**
+ * Far-out terrain drawing: one picture per 16 x 16 tile chunk. Each picture also draws the ring
+ * of tiles around its chunk, under its neighbors' pictures, so chunks meet without seams at any
+ * zoom. Pictures are kept least recently used first, up to about 200 MB.
  */
 export class TerrainCache {
   private pics = new Map<string, ChunkPic>();
+  /** The newest picture of each chunk at any scale, shown while the right one is being made. */
+  private latest = new Map<number, ChunkPic>();
   private bytes = 0;
   private readonly budget = 200 * 1024 * 1024;
 
   clear() {
     this.pics.clear();
+    this.latest.clear();
     this.bytes = 0;
   }
 
   /**
-   * Draws the chunks in view. `scale` is device pixels per world pixel; `offX/offY` place world
-   * (0, 0) on the canvas, already rounded to whole pixels. Pictures are made for up to
-   * `budgetMs` per frame; the rest are filled in on the next frames.
+   * Draws the chunks in view at scale `k` (device pixels per world pixel); `offX/offY` place
+   * world (0, 0) on the canvas. `settled` is false while the zoom is changing. Pictures are made
+   * for up to `budgetMs` per frame; until a chunk's picture is ready, its newest picture at
+   * another scale stands in.
    */
-  draw(ctx: Ctx, m: MapData, fog: FogView, fogVersion: Uint32Array, scale: number, scaleKey: number, offX: number, offY: number, view: { x0: number; y0: number; x1: number; y1: number }, budgetMs = 6) {
+  draw(ctx: Ctx, m: MapData, fog: FogView, fogVersion: Uint32Array, k: number, settled: boolean, offX: number, offY: number, view: { x0: number; y0: number; x1: number; y1: number }, budgetMs = 6) {
     const start = performance.now();
+    const busy = () => performance.now() - start > budgetMs;
+    const L = settled ? Math.round(k * 1000) / 1000 : cacheScale(k);
     const per = Math.ceil(m.size / CHUNK);
     const cx0 = Math.max(0, Math.floor(view.x0 / CHUNK));
     const cy0 = Math.max(0, Math.floor(view.y0 / CHUNK));
     const cx1 = Math.min(per - 1, Math.floor(view.x1 / CHUNK));
     const cy1 = Math.min(per - 1, Math.floor(view.y1 / CHUNK));
-    // Pictures are made until this frame's time budget is used up; the rest wait for later frames.
-    const busy = () => performance.now() - start > budgetMs;
     for (let d = cx0 + cy0; d <= cx1 + cy1; d++) {
       for (let cx = Math.max(cx0, d - cy1); cx <= Math.min(cx1, d - cy0); cx++) {
         const cy = d - cx;
-        const key = `${scaleKey}:${cx}:${cy}`;
-        // The chunk's own fog and its neighbors' (the fog-edge wash looks one tile across).
+        // The chunk's own fog and its neighbors' (its ring of tiles and the fog-edge wash look across).
         let version = 0;
         for (let ny = Math.max(0, cy - 1); ny <= Math.min(per - 1, cy + 1); ny++)
           for (let nx = Math.max(0, cx - 1); nx <= Math.min(per - 1, cx + 1); nx++) version += fogVersion[ny * per + nx];
+        const key = `${L}:${cx}:${cy}`;
         let pic = this.pics.get(key);
-        if (pic && pic.version !== version) {
-          if (busy()) {
-            // Keep showing the old picture until there is time to redraw it.
-          } else {
-            this.bytes -= pic.bytes;
-            this.pics.delete(key);
-            pic = undefined;
+        if (!pic || pic.version !== version) {
+          if (!busy()) {
+            if (pic) this.bytes -= pic.bytes;
+            pic = this.make(m, fog, cx, cy, L, version);
+            this.bytes += pic.bytes;
+            this.latest.set(cy * per + cx, pic);
+          } else if (!pic) {
+            pic = this.latest.get(cy * per + cx);
           }
         }
-        if (!pic) {
-          if (busy()) continue;
-          pic = this.make(m, fog, cx, cy, scale, version);
-          this.bytes += pic.bytes;
-        } else {
-          this.pics.delete(key);
-        }
-        this.pics.set(key, pic);
-        ctx.drawImage(pic.canvas, pic.ox + offX, pic.oy + offY);
+        if (!pic) continue;
+        // Mark as recently used.
+        this.pics.delete(`${pic.scale}:${cx}:${cy}`);
+        this.pics.set(`${pic.scale}:${cx}:${cy}`, pic);
+        const r = k / pic.scale;
+        ctx.drawImage(pic.canvas, pic.ox * r + offX, pic.oy * r + offY, pic.canvas.width * r, pic.canvas.height * r);
       }
     }
     // Drop the least recently used pictures past the budget.
@@ -369,13 +422,13 @@ export class TerrainCache {
   }
 
   private make(m: MapData, fog: FogView, cx: number, cy: number, scale: number, version: number): ChunkPic {
-    const x0 = cx * CHUNK;
-    const y0 = cy * CHUNK;
-    const left = isoX(x0, y0 + CHUNK) - PAD;
+    const x0 = cx * CHUNK - 1;
+    const y0 = cy * CHUNK - 1;
+    const n = CHUNK + 2;
+    const left = isoX(x0, y0 + n) - PAD;
     const top = isoY(x0, y0) - CLIFF_H - PAD;
-    const width = CHUNK * 2 * HW + 2 * PAD;
-    const height = CHUNK * 2 * HH + CLIFF_H + EXTRA_BOTTOM + 2 * PAD;
-    // Snap the picture's corner to a whole device pixel, so neighboring chunks meet exactly.
+    const width = n * 2 * HW + 2 * PAD;
+    const height = n * 2 * HH + CLIFF_H + EXTRA_BOTTOM + 2 * PAD;
     const ox = Math.floor(left * scale);
     const oy = Math.floor(top * scale);
     const canvas = document.createElement('canvas');
@@ -383,7 +436,7 @@ export class TerrainCache {
     canvas.height = Math.ceil(height * scale) + 2;
     const ctx = canvas.getContext('2d')!;
     ctx.setTransform(scale, 0, 0, scale, -ox, -oy);
-    drawTiles(ctx, m, fog, x0, y0, x0 + CHUNK - 1, y0 + CHUNK - 1, 1 / scale);
-    return { canvas, ox, oy, version, bytes: canvas.width * canvas.height * 4 };
+    drawTiles(ctx, m, fog, x0, y0, x0 + n - 1, y0 + n - 1, 1 / scale);
+    return { canvas, ox, oy, scale, version, bytes: canvas.width * canvas.height * 4 };
   }
 }
