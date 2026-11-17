@@ -516,10 +516,17 @@ export const POLE_TOP = 44;
 
 // ---------------------------------------------------------------- units
 
-/** A Minuteman: a stick figure in the owner's color with a helmet. `walk` advances the stride. */
-export function drawMinuteman(ctx: Ctx, X: number, Y: number, color: string, dark: string, facing: number, walk: number, moving: boolean) {
+/**
+ * A Minuteman: a stick figure in the owner's color with a helmet. `walk` advances the stride;
+ * `attack` throws the front arm forward in a strike; `hurt` flashes it pale.
+ */
+export function drawMinuteman(ctx: Ctx, X: number, Y: number, color: string, dark: string, facing: number, walk: number, moving: boolean, attack = false, hurt = false) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  if (hurt) {
+    color = '#ffd9d0';
+    dark = '#f2b3a6';
+  }
   // Shadow.
   ctx.fillStyle = 'rgba(0, 38, 87, 0.22)';
   ctx.beginPath();
@@ -528,14 +535,18 @@ export function drawMinuteman(ctx: Ctx, X: number, Y: number, color: string, dar
 
   const sw = moving ? Math.sin(walk) * 4.5 : 0;
   const bob = moving ? Math.abs(Math.cos(walk)) * 1.2 : 0;
+  const lean = attack ? facing * 2 : 0;
   const hip: Pt = [X, Y - 11 - bob];
-  const neck: Pt = [X + facing * 0.8, Y - 20 - bob];
+  const neck: Pt = [X + facing * 0.8 + lean, Y - 20 - bob];
+  const frontArm: Pt[] = attack
+    ? [neck, [neck[0] + facing * 4.5, neck[1] + 1], [neck[0] + facing * 9, neck[1] + 0.5]]
+    : [neck, [X + facing * 2 + sw * 0.6, Y - 15 - bob], [X + facing * 4 + sw * 0.9, Y - 12 - bob]];
   const limbs: [Pt[], string][] = [
     [[neck, [X - facing * 1 - sw * 0.6, Y - 15 - bob], [X - sw * 0.9, Y - 11 - bob]], dark], // back arm
     [[hip, [X - sw * 0.5, Y - 5.5], [X - sw, Y - 0.5]], dark], // back leg
     [[hip, neck], color],
-    [[hip, [X + sw * 0.5, Y - 5.5], [X + sw, Y - 0.5]], color], // front leg
-    [[neck, [X + facing * 2 + sw * 0.6, Y - 15 - bob], [X + facing * 4 + sw * 0.9, Y - 12 - bob]], color], // front arm
+    [[hip, [X + sw * 0.5 + (attack ? facing * 1.5 : 0), Y - 5.5], [X + sw + (attack ? facing * 3 : 0), Y - 0.5]], color], // front leg
+    [frontArm, color],
   ];
   for (const [pts, col] of limbs) {
     for (const [stroke, width] of [
@@ -551,7 +562,7 @@ export function drawMinuteman(ctx: Ctx, X: number, Y: number, color: string, dar
     }
   }
   // Head and helmet.
-  const hx = X + facing * 1.2;
+  const hx = X + facing * 1.2 + lean;
   const hy = Y - 25 - bob;
   ctx.fillStyle = color;
   ctx.strokeStyle = C.NAVY;
@@ -573,6 +584,15 @@ export function drawMinuteman(ctx: Ctx, X: number, Y: number, color: string, dar
   ctx.moveTo(hx + facing * 1, hy + 0.8);
   ctx.lineTo(hx + facing * 4.4, hy + 0.8);
   ctx.stroke();
+}
+
+/** A small health bar centered at (X, Y), in world pixels. */
+export function drawHealthBar(ctx: Ctx, X: number, Y: number, w: number, frac: number) {
+  const f = Math.max(0, Math.min(1, frac));
+  ctx.fillStyle = 'rgba(0, 20, 45, 0.75)';
+  ctx.fillRect(X - w / 2 - 1, Y - 2.5, w + 2, 5);
+  ctx.fillStyle = f > 0.5 ? '#5fbf6a' : f > 0.25 ? '#f2c94c' : C.RED;
+  ctx.fillRect(X - w / 2, Y - 1.5, w * f, 3);
 }
 
 /** The selection mark under a unit. */

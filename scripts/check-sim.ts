@@ -6,6 +6,9 @@
 import { MAPS, getMap } from '../src/sim/map/maps.ts';
 import { Tile } from '../src/sim/map/types.ts';
 import { createMatch, spawnUnit } from '../src/sim/match.ts';
+import { UNITS } from '../src/sim/content/units.ts';
+import { PULSE_DAMAGE, UNIT_LIMIT } from '../src/sim/constants.ts';
+import { unitTile as unitTileOf } from '../src/sim/state.ts';
 import { spreadTiles } from '../src/sim/path.ts';
 import { step } from '../src/sim/step.ts';
 import { stateHash } from '../src/sim/hash.ts';
@@ -389,6 +392,176 @@ if (e1 && e2) {
   for (let i = 0; i < 200; i++) step(s, []);
   const ms = (performance.now() - t0) / 200;
   console.log(`Belt load: ${s.belts.length} belt tiles, full, ${ms.toFixed(2)} ms a tick.`);
+}
+
+// Combat (Stage 3), on a match with an idle CPU.
+function combatMatch() {
+  const s = createMatch({ mapId: 'basin', seed: 21, players: [{ name: 'A', color: 0 }, { name: 'CPU', color: 1, cpu: 'idle' }] });
+  for (const p of s.players) p.explored.fill(1);
+  return s;
+}
+const near = (s: ReturnType<typeof createMatch>, tile: number, n: number) => spreadTiles(s, tile, n);
+{
+  // 10 Minutemen ordered to attack the CPU's 3, which hold their ground. Twice, for determinism.
+  const fight = () => {
+    const s = combatMatch();
+    const cpuUnits = s.units.filter((u) => u.owner === 2);
+    const spot = unitTileOf(s, cpuUnits[0]);
+    const mine = near(s, spot + 6 * s.size, 13).slice(3).map((t) => spawnUnit(s, 1, 'minuteman', t));
+    step(s, [{ type: 'attack', player: 1, units: mine.map((u) => u.id), target: cpuUnits[0].id }]);
+    for (let i = 0; i < 20 * 40; i++) {
+      // Once the first falls, attack the next.
+      const left = s.units.filter((u) => u.owner === 2);
+      if (!left.length) break;
+      const busy = s.units.some((u) => u.owner === 1 && u.order?.kind === 'attack');
+      step(s, busy ? [] : [{ type: 'attack', player: 1, units: s.units.filter((u) => u.owner === 1).map((u) => u.id), target: left[0].id }]);
+    }
+    return { s, mineLeft: s.units.filter((u) => u.owner === 1).length - 3, cpuLeft: s.units.filter((u) => u.owner === 2).length, hash: stateHash(s), tick: s.tick };
+  };
+  const a = fight();
+  const b = fight();
+  if (a.cpuLeft !== 0) fail(`combat: 10 Minutemen left ${a.cpuLeft} of the CPU's 3 standing`);
+  else if (a.hash !== b.hash) fail('combat: two runs of the same fight differ');
+  else console.log(`Combat: 10 Minutemen beat the CPU's 3 in ${(a.tick / 20).toFixed(1)} s, losing ${10 - a.mineLeft}; two runs identical.`);
+}
+{
+  // The Hub's pulse hurts enemy units near it.
+  const s = combatMatch();
+  const cpuHub = s.structures.find((t) => t.owner === 2 && t.kind === 'hub')!;
+  const t = near(s, (cpuHub.y + cpuHub.h + 2) * s.size + cpuHub.x - 3, 1)[0];
+  const u = spawnUnit(s, 1, 'minuteman', t);
+  u.mode = 'directed';
+  for (const o of s.units) if (o.owner === 2) o.hp = 0; // keep the CPU's Minutemen out of it
+  step(s, []);
+  for (let i = 0; i < 20 * 6; i++) step(s, []);
+  const lost = UNITS.minuteman.hp - (s.units.find((o) => o.id === u.id)?.hp ?? 0);
+  if (lost < PULSE_DAMAGE) fail(`pulse: a Minuteman next to the enemy Hub lost ${lost} health in 6 s`);
+  else console.log(`Pulse: a Minuteman next to the CPU's Hub lost ${lost} health to its pulse in 6 s.`);
+}
+{
+  // A Deployer makes Minutemen from parts given by hand; they gather at its rally point. Aggressive ones chase an enemy and come back.
+  const s = combatMatch();
+  const me = s.players[0];
+  me.hub = { ironPlate: 500, ironRod: 500, wire: 500, cable: 500, screws: 500 };
+  const hub = s.structures.find((t) => t.id === me.hubId)!;
+  let spot: { x: number; y: number } | null = null;
+  for (let r = 7; r < 16 && !spot; r++)
+    for (let dy = -r; dy <= r && !spot; dy++)
+      for (let dx = -r; dx <= r && !spot; dx++) if (canPlace(s, 1, 'deployer', hub.x + dx, hub.y + dy, 0).ok && canPlace(s, 1, 'solar', hub.x + dx + 4, hub.y + dy, 0).ok && canPlace(s, 1, 'solar', hub.x + dx + 4, hub.y + dy + 2, 0).ok && canPlace(s, 1, 'solar', hub.x + dx + 4, hub.y + dy - 2, 0).ok) spot = { x: hub.x + dx, y: hub.y + dy };
+  if (!spot) fail('production: no room for a Deployer');
+  else {
+    step(s, [
+      { type: 'build', player: 1, kind: 'deployer', x: spot.x, y: spot.y, rot: 0 },
+      { type: 'build', player: 1, kind: 'solar', x: spot.x + 4, y: spot.y, rot: 0 },
+      { type: 'build', player: 1, kind: 'solar', x: spot.x + 4, y: spot.y + 2, rot: 0 },
+      { type: 'build', player: 1, kind: 'solar', x: spot.x + 4, y: spot.y - 2, rot: 0 },
+    ]);
+    const [dep, s1, s2, s3] = s.structures.slice(-4);
+    const startHp = dep.hp;
+    for (let i = 0; i < 20 * 8; i++) step(s, []);
+    // Placed at a tenth of its health, then one tick of building already happened.
+    if (startHp > Math.ceil(STRUCTURES.deployer.hp / 10) + 10 || dep.hp !== STRUCTURES.deployer.hp) fail(`build health: a Deployer went from ${startHp} to ${dep.hp} health (expected about ${Math.ceil(STRUCTURES.deployer.hp / 10)} to ${STRUCTURES.deployer.hp})`);
+    step(s, [
+      { type: 'line', player: 1, a: s2.id, b: s1.id },
+      { type: 'line', player: 1, a: s1.id, b: s3.id },
+      { type: 'line', player: 1, a: s3.id, b: dep.id },
+      { type: 'produce', player: 1, id: dep.id, unit: 'minuteman' },
+      { type: 'mode', player: 1, id: dep.id, mode: 'auto', imperative: 'aggressive' },
+    ]);
+    step(s, [{ type: 'give', player: 1, id: dep.id, item: 'ironPlate' }, { type: 'give', player: 1, id: dep.id, item: 'screws' }]);
+    const before = s.units.filter((u) => u.owner === 1).length;
+    for (let i = 0; i < 20 * 13; i++) step(s, []);
+    const made = s.units.filter((u) => u.owner === 1 && u.source === dep.id);
+    if (made.length !== 2) fail(`production: a Deployer made ${made.length} Minutemen in 13 s (expected 2 at 6 s each); units ${before} -> ${s.units.filter((u) => u.owner === 1).length}`);
+    else console.log(`Production: a Deployer built in 8 s (health ${startHp} -> ${dep.hp}), then made 2 Minutemen in 13 s from parts given by hand.`);
+    // An enemy walks into sight of the Aggressive Minutemen: they chase it, kill it and go back.
+    for (let i = 0; i < 20 * 5; i++) step(s, []);
+    const home = made[0].home;
+    const t = near(s, made[0].home + 6, 1)[0];
+    const enemy = spawnUnit(s, 2, 'minuteman', t, { mode: 'directed' });
+    for (let i = 0; i < 20 * 20 && s.units.some((u) => u.id === enemy.id); i++) step(s, []);
+    for (let i = 0; i < 20 * 6; i++) step(s, []);
+    const back = s.units.find((u) => u.id === made[0].id);
+    if (s.units.some((u) => u.id === enemy.id)) fail('aggressive: the Minutemen did not kill an enemy that walked into sight');
+    else if (back && unitTileOf(s, back) !== home) fail('aggressive: a Minuteman did not go back to its rally point after the fight');
+    else console.log('Aggressive: Deployer Minutemen chased and killed an enemy that came into sight, then went back to the rally point.');
+    // The unit limit pauses production.
+    for (let k = 0; k < UNIT_LIMIT; k++) spawnUnit(s, 1, 'minuteman', made[0].home);
+    step(s, [{ type: 'give', player: 1, id: dep.id, item: 'ironPlate' }, { type: 'give', player: 1, id: dep.id, item: 'screws' }]);
+    const count = s.units.filter((u) => u.owner === 1).length;
+    for (let i = 0; i < 20 * 8; i++) step(s, []);
+    if (s.units.filter((u) => u.owner === 1).length > count || dep.status !== 'atLimit') fail(`unit limit: production went on past the limit (status ${dep.status})`);
+    else console.log(`Unit limit: at ${count} units the Deployer paused (status ${dep.status}).`);
+  }
+}
+{
+  // A unit placed by hand is made at the Hub, walks to the spot and holds it.
+  const s = combatMatch();
+  const me = s.players[0];
+  me.hub = { ironPlate: 50, screws: 50 };
+  const hub = s.structures.find((t) => t.id === me.hubId)!;
+  const target = near(s, (hub.y - 6) * s.size + hub.x + 10, 1)[0];
+  step(s, [{ type: 'placeUnit', player: 1, kind: 'minuteman', x: target % s.size, y: Math.floor(target / s.size) }]);
+  const paid = 50 - (me.hub.ironPlate ?? 0);
+  for (let i = 0; i < 20 * 15; i++) step(s, []);
+  const placed = s.units.find((u) => u.owner === 1 && u.imperative === 'hold' && u.mode === 'auto');
+  if (!placed || unitTileOf(s, placed) !== placed.home || placed.home !== target) fail(`hand-placed: no Minuteman holding the spot (paid ${paid} plates)`);
+  else console.log(`Hand-placed: a Minuteman paid from the Hub (${paid} Iron Plate) was made there and holds the spot it was placed on.`);
+}
+{
+  // Explore reveals fog on its own; Patrol walks its points in turn.
+  const s = createMatch({ mapId: 'basin', seed: 33, players: [{ name: 'A', color: 0 }] });
+  const me = s.players[0];
+  const hub = s.structures[0];
+  const t0 = spreadTiles(s, (hub.y + hub.h + 2) * s.size + hub.x + 2, 1)[0];
+  const scout = spawnUnit(s, 1, 'minuteman', t0, { mode: 'auto', imperative: 'explore', home: t0 });
+  const before = me.explored.reduce((a, v) => a + v, 0);
+  for (let i = 0; i < 20 * 40; i++) step(s, []);
+  const after = me.explored.reduce((a, v) => a + v, 0);
+  if (after < before * 1.5) fail(`explore: explored tiles went from ${before} to ${after} in 40 s`);
+  else console.log(`Explore: a Minuteman on Explore uncovered ${after - before} more tiles in 40 s on its own.`);
+  const ring = spreadTiles(s, t0, 200);
+  const pts = [ring[60], ring[120], ring[199]];
+  const pat = spawnUnit(s, 1, 'minuteman', t0, { mode: 'auto', imperative: 'patrol', home: t0, patrol: pts });
+  const visited = new Set<number>();
+  for (let i = 0; i < 20 * 40; i++) {
+    step(s, []);
+    visited.add(unitTileOf(s, pat));
+  }
+  if (![t0, ...pts].every((t) => visited.has(t))) fail('patrol: a patrolling Minuteman did not visit all its points');
+  else console.log('Patrol: a Minuteman on Patrol walked its home and all three patrol points in turn.');
+}
+{
+  // Destroying a Hub puts its player out; everything they had goes (SPEC).
+  const s = combatMatch();
+  const cpu = s.players[1];
+  const cpuHub = s.structures.find((t) => t.id === cpu.hubId)!;
+  cpuHub.hp = 10;
+  for (const o of s.units) if (o.owner === 2) o.hp = 0;
+  const slots = near(s, (cpuHub.y + cpuHub.h) * s.size + cpuHub.x + 2, 4);
+  const mine = slots.map((t) => spawnUnit(s, 1, 'minuteman', t));
+  step(s, [{ type: 'attack', player: 1, units: mine.map((u) => u.id), target: cpuHub.id }]);
+  for (let i = 0; i < 20 * 10 && !cpu.eliminated; i++) step(s, []);
+  if (!cpu.eliminated || s.structures.some((t) => t.owner === 2) || s.units.some((u) => u.owner === 2)) fail('elimination: destroying the CPU Hub did not remove the CPU');
+  else console.log('Elimination: destroying the CPU Hub put it out of the match and removed everything it had.');
+}
+{
+  // Load: 4 players, 200 Aggressive Minutemen each, all meeting in the middle.
+  const s = createMatch({ mapId: 'basin', seed: 99, players: [0, 1, 2, 3].map((c) => ({ name: 'P' + c, color: c })) });
+  const c = s.size / 2;
+  for (const p of s.players) {
+    const hub = s.structures.find((t) => t.id === p.hubId)!;
+    for (const t of spreadTiles(s, (hub.y + hub.h + 2) * s.size + hub.x + 2, 200).slice(3)) spawnUnit(s, p.id, 'minuteman', t, { mode: 'auto', imperative: 'aggressive', home: (c - 14) * s.size + c + 14 });
+  }
+  let worst = 0;
+  const t0 = performance.now();
+  for (let i = 0; i < 20 * 60; i++) {
+    const a = performance.now();
+    step(s, []);
+    worst = Math.max(worst, performance.now() - a);
+  }
+  const avg = (performance.now() - t0) / (20 * 60);
+  console.log(`Battle load: ${s.players.length} x 200 Aggressive Minutemen marching to one spot and fighting for 60 s: ${avg.toFixed(2)} ms a tick on average, worst ${worst.toFixed(1)} ms; ${s.units.length} left.`);
 }
 
 // Load: 4 players with 200 units each (the unit limit), all ordered across the map at once.

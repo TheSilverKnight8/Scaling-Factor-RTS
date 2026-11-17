@@ -5,7 +5,10 @@ import { NODE_SIZE } from '../sim/map/types';
 import { cache, type Belt, type MatchState } from '../sim/state';
 import type { Camera } from '../game/camera';
 import { HH, HW, isoX, isoY, toTile } from './iso';
-import { POLE_TOP, STRUCTURE_HEIGHT, drawMinuteman, drawNode, drawStructure, drawUnitRing, footprintPath, type Pt } from './objects';
+import { POLE_TOP, STRUCTURE_HEIGHT, drawHealthBar, drawMinuteman, drawNode, drawStructure, drawUnitRing, footprintPath, type Pt } from './objects';
+import { STRUCTURES } from '../sim/content/structures';
+import { UNITS } from '../sim/content/units';
+import { PULSE_REACH } from '../sim/constants';
 import { SpriteCache } from './sprites';
 import * as C from './style';
 import { MAX_CACHE_SCALE, TerrainCache, drawTiles } from './terrain';
@@ -31,6 +34,22 @@ export interface Marker {
   y: number;
   /** When it was placed, in ms. */
   at: number;
+  /** A move order (diamond) or an attack order (red ring around the target). */
+  kind?: 'move' | 'attack';
+}
+
+/** Short-lived drawings for things that happened: a unit dying, a structure destroyed, a Hub's pulse. */
+export interface Effect {
+  kind: 'death' | 'destroyed' | 'pulse';
+  /** Tiles (fractions allowed): the spot, or a footprint's corner and size. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** For a pulse: the Hub. */
+  hub?: number;
+  /** When it happened, in ms. */
+  at: number;
 }
 
 export interface RenderView {
@@ -55,6 +74,13 @@ export interface RenderView {
   lineGhost: { a: Pt; b: Pt; ok: boolean } | null;
   /** Show item ports (while building). */
   showPorts: boolean;
+  effects: Effect[];
+  /** The selected structure's rally point and patrol points (tile indices), drawn as flags. */
+  rally: { from: number; tile: number; patrol: number[] } | null;
+  /** Where units placed by hand are going (tile indices). */
+  placed: number[];
+  /** A patrol route being set (tile indices). */
+  patrolDraft: number[] | null;
   /** Box selection in CSS pixels. */
   drag: { x0: number; y0: number; x1: number; y1: number } | null;
   markers: Marker[];
@@ -156,6 +182,18 @@ export class Renderer {
       if (b.kind !== 'belt' || !inView(b.x, b.y, 1) || !seen(b.x, b.y)) continue;
       flatBelts.push({ b, from: beltFeed(s, b) });
     }
+    // Units walking to spots placed by hand.
+    for (const t of v.placed) {
+      const X = isoX((t % size) + 0.5, Math.floor(t / size) + 0.5);
+      const Y = isoY((t % size) + 0.5, Math.floor(t / size) + 0.5);
+      ctx.strokeStyle = 'rgba(250, 238, 218, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.ellipse(X, Y, 14, 7, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // Belt tiles are stamped from cached pictures: one per direction, bend and chevron frame.
     const beltFrame = Math.floor(((v.time / 1000) % 1) * BELT_FRAMES);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -217,23 +255,34 @@ export class Renderer {
         },
       });
     }
+    const bars: (() => void)[] = [];
     for (const t of s.structures) {
       if (!inView(t.x, t.y, 6)) continue;
+      // Explored ground shows everything (Caleb); other players' things stay hidden in fog.
+      if (t.owner !== v.me && !seen(t.x, t.y) && !seen(t.x + t.w - 1, t.y + t.h - 1)) continue;
       const col = C.PLAYER_COLORS[colorOf.get(t.owner) ?? 0];
+      const hurt = s.tick - t.lastHurt < 3;
       items.push({
         depth: t.x + t.y + (t.w + t.h) / 2,
         draw: (g) =>
           drawStructure(
             g,
-            { kind: t.kind, x: t.x, y: t.y, w: t.w, h: t.h, rot: t.rot, color: col.main, dark: col.dark, progress: t.buildLeft > 0 ? 1 - t.buildLeft / t.buildTotal : undefined, active: t.status === 'working' },
+            { kind: t.kind, x: t.x, y: t.y, w: t.w, h: t.h, rot: t.rot, color: hurt ? '#ffd9d0' : col.main, dark: hurt ? '#f2b3a6' : col.dark, progress: t.buildLeft > 0 ? 1 - t.buildLeft / t.buildTotal : undefined, active: t.status === 'working' },
             v.time,
           ),
       });
+      const max = STRUCTURES[t.kind].hp;
+      if (t.buildLeft === 0 && (t.hp < max || t.id === v.selectedStructure)) {
+        const X = isoX(t.x + t.w / 2, t.y + t.h / 2);
+        const Y = isoY(t.x + t.w / 2, t.y + t.h / 2) - (STRUCTURE_HEIGHT[t.kind] ?? 24) - 8;
+        bars.push(() => drawHealthBar(ctx, X, Y, Math.min(60, 14 + (t.w + t.h) * 6), t.hp / max));
+      }
     }
     for (const u of s.units) {
       const ux = (u.px + (u.x - u.px) * v.alpha) / FP;
       const uy = (u.py + (u.y - u.py) * v.alpha) / FP;
       if (!inView(ux, uy, 2)) continue;
+      if (u.owner !== v.me && !seen(Math.floor(ux), Math.floor(uy))) continue;
       const colorIndex = colorOf.get(u.owner) ?? 0;
       const col = C.PLAYER_COLORS[colorIndex];
       // Device pixel of the unit's feet.
@@ -244,13 +293,21 @@ export class Renderer {
       // One of 8 stride pictures while walking, or standing still.
       const frame = moving ? Math.floor((((ux + uy) * 3.4) / (Math.PI * 2)) * WALK_FRAMES) % WALK_FRAMES : -1;
       const selected = v.selectedUnits.has(u.id);
+      const attack = s.tick - u.lastAttack < 5;
+      const hurt = s.tick - u.lastHurt < 3;
+      const maxHp = UNITS[u.kind].hp;
+      if (u.hp < maxHp || selected) {
+        const X = isoX(ux, uy);
+        const Y = isoY(ux, uy) - 36;
+        bars.push(() => drawHealthBar(ctx, X, Y, 18, u.hp / maxHp));
+      }
       items.push({
         depth: ux + uy,
         draw: (g) => {
           g.setTransform(1, 0, 0, 1, 0, 0);
           if (selected) this.sprites.stamp(g, 'ring', k, v.zoomSettled, dx, dy, RING_BOUNDS, (r) => drawUnitRing(r, 0, 0));
-          this.sprites.stamp(g, `${u.kind}:${colorIndex}:${facing}:${frame}`, k, v.zoomSettled, dx, dy, FIGURE_BOUNDS, (f) =>
-            drawMinuteman(f, 0, 0, col.main, col.dark, facing, ((frame + 0.5) / WALK_FRAMES) * Math.PI * 2, frame >= 0),
+          this.sprites.stamp(g, `${u.kind}:${colorIndex}:${facing}:${frame}:${attack ? 'a' : ''}${hurt ? 'h' : ''}`, k, v.zoomSettled, dx, dy, FIGURE_BOUNDS, (f) =>
+            drawMinuteman(f, 0, 0, col.main, col.dark, facing, ((frame + 0.5) / WALK_FRAMES) * Math.PI * 2, frame >= 0, attack, hurt),
           );
           world();
         },
@@ -258,6 +315,10 @@ export class Renderer {
     }
     items.sort((a, b) => a.depth - b.depth);
     for (const it of items) it.draw(ctx);
+    for (const b of bars) b();
+    this.drawEffects(ctx, v);
+    if (v.rally) this.drawRally(ctx, v, v.rally.from, v.rally.tile, v.rally.patrol, false);
+    if (v.patrolDraft && v.rally) this.drawRally(ctx, v, v.rally.from, v.rally.tile, v.patrolDraft, true);
 
     // Power lines, above everything on the ground.
     const anchor = (id: number): Pt | null => {
@@ -303,12 +364,22 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
-    // Move markers: a red diamond that shrinks away.
+    // Order markers: a diamond that shrinks away for a move, a red ring for an attack.
     for (const m of v.markers) {
       const age = (v.time - m.at) / 600;
       if (age >= 1) continue;
       const X = isoX(m.x + 0.5, m.y + 0.5);
       const Y = isoY(m.x + 0.5, m.y + 0.5);
+      if (m.kind === 'attack') {
+        ctx.strokeStyle = C.RED;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = 1 - age;
+        ctx.beginPath();
+        ctx.ellipse(X, Y, 20 * (1.2 - age * 0.4), 10 * (1.2 - age * 0.4), 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        continue;
+      }
       const r = 1 - age * 0.6;
       ctx.strokeStyle = C.RED;
       ctx.lineWidth = 2.5;
@@ -336,6 +407,109 @@ export class Renderer {
       ctx.lineWidth = 1.5;
       ctx.strokeRect(x + 0.5, y + 0.5, w, h);
     }
+  }
+
+  /** Dust for a fallen unit, debris for a destroyed structure, a ring for a Hub's pulse. */
+  private drawEffects(ctx: CanvasRenderingContext2D, v: RenderView) {
+    const c = cache(v.state);
+    for (const e of v.effects) {
+      const age = (v.time - e.at) / (e.kind === 'destroyed' ? 900 : 600);
+      if (age < 0 || age >= 1) continue;
+      ctx.globalAlpha = 1 - age;
+      if (e.kind === 'pulse') {
+        const hub = c.structById.get(e.hub ?? 0);
+        if (!hub) continue;
+        const X = isoX(hub.x + hub.w / 2, hub.y + hub.h / 2);
+        const Y = isoY(hub.x + hub.w / 2, hub.y + hub.h / 2);
+        const r = ((hub.w / 2 + PULSE_REACH) * age + 1) * HW * Math.SQRT2;
+        ctx.strokeStyle = C.RED;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(X, Y, r, r / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (e.kind === 'death') {
+        const X = isoX(e.x, e.y);
+        const Y = isoY(e.x, e.y);
+        ctx.fillStyle = '#b9ae9a';
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.arc(X + Math.cos(a) * 10 * age, Y - 6 + Math.sin(a) * 5 * age - age * 6, 4 * (1 - age) + 1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        const X = isoX(e.x + e.w / 2, e.y + e.h / 2);
+        const Y = isoY(e.x + e.w / 2, e.y + e.h / 2);
+        for (let i = 0; i < 9; i++) {
+          const a = (i / 9) * Math.PI * 2;
+          ctx.fillStyle = i % 2 ? C.METAL_DARK : '#c46a35';
+          ctx.fillRect(X + Math.cos(a) * 30 * age - 3, Y - 20 * age + Math.sin(a) * 15 * age - 3, 6, 6);
+        }
+        ctx.fillStyle = 'rgba(60, 55, 50, 0.6)';
+        ctx.beginPath();
+        ctx.ellipse(X, Y - 10 - 20 * age, 18 + 20 * age, 10 + 10 * age, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** A flag on a rally point with a dashed line to it, and numbered patrol points. */
+  private drawRally(ctx: CanvasRenderingContext2D, v: RenderView, from: number, tile: number, patrol: number[], draft: boolean) {
+    const size = v.state.size;
+    const t = cache(v.state).structById.get(from);
+    if (!t) return;
+    const pt = (i: number): [number, number] => [isoX((i % size) + 0.5, Math.floor(i / size) + 0.5), isoY((i % size) + 0.5, Math.floor(i / size) + 0.5)];
+    const [sx, sy] = [isoX(t.x + t.w / 2, t.y + t.h / 2), isoY(t.x + t.w / 2, t.y + t.h / 2)];
+    const [rx, ry] = pt(tile);
+    ctx.setLineDash([6, 5]);
+    ctx.strokeStyle = 'rgba(250, 238, 218, 0.8)';
+    ctx.lineWidth = 2;
+    if (!draft) {
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(rx, ry);
+      ctx.stroke();
+    }
+    if (patrol.length) {
+      ctx.strokeStyle = draft ? C.CREAM : 'rgba(252, 63, 63, 0.85)';
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      for (const p of patrol) ctx.lineTo(...pt(p));
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // The flag.
+    ctx.strokeStyle = C.NAVY;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(rx, ry);
+    ctx.lineTo(rx, ry - 26);
+    ctx.stroke();
+    ctx.fillStyle = C.RED;
+    ctx.beginPath();
+    ctx.moveTo(rx, ry - 26);
+    ctx.lineTo(rx + 14, ry - 21);
+    ctx.lineTo(rx, ry - 16);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    patrol.forEach((p, i) => {
+      const [px, py] = pt(p);
+      ctx.fillStyle = C.NAVY;
+      ctx.strokeStyle = C.CREAM;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(px, py - 4, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = C.CREAM;
+      ctx.font = 'bold 10px Archivo Variable, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(i + 1), px, py - 3.5);
+    });
   }
 
   private drawGhostGround(ctx: CanvasRenderingContext2D, g: Ghost, size: number) {

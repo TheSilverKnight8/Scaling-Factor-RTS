@@ -5,6 +5,7 @@ import { DX, DY } from './content/structures';
 import { BELT_SPACING, BELT_SPEED } from './content/transport';
 import { FP } from './fmath';
 import { cache, type Belt, type MatchState, type Structure } from './state';
+import { isProducer, producerRoom } from './production';
 
 // How items pass from one thing to the next: off the end of a belt, out of a structure's
 // output port, into a belt, splitter or merger, or into a structure's input port. Ports that
@@ -25,6 +26,7 @@ export function structureAccepts(t: Structure, item: ItemId): boolean {
     return !!need && (t.inv[item] ?? 0) < need[1] * INPUT_CYCLES;
   }
   if (t.kind === 'depot') return bagTotal(t.inv) < DEPOT_CAPACITY;
+  if (isProducer(t)) return producerRoom(t, item) > 0;
   return false;
 }
 

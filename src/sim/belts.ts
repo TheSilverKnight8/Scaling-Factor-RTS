@@ -1,5 +1,6 @@
 import { TRANSPORT, BELT_SPACING, BELT_SPEED, type TransportKind } from './content/transport';
 import { bagAdd } from './content/items';
+import { BELT_HP } from './constants';
 import { canAfford, pay, refund } from './economy';
 import { deliver } from './flow';
 import { FP } from './fmath';
@@ -71,7 +72,7 @@ export function placeBelts(s: MatchState, player: number, kind: TransportKind, t
       continue;
     }
     const id = s.nextId++;
-    s.belts.push({ id, owner: player, kind, x: t.x, y: t.y, dir: t.dir, items: [], rr: kind === 'merger' ? -1 : 0 });
+    s.belts.push({ id, owner: player, kind, x: t.x, y: t.y, dir: t.dir, items: [], rr: kind === 'merger' ? -1 : 0, hp: BELT_HP });
     s.beltAt[i] = id;
   }
   s.transportVersion++;

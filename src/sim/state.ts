@@ -1,7 +1,7 @@
 import type { Bag, ItemId } from './content/items';
 import { portsOf, type Port, type StructureKind } from './content/structures';
 import type { TransportKind } from './content/transport';
-import type { UnitKind } from './content/units';
+import type { Imperative, UnitKind } from './content/units';
 import { FOG_CHUNK } from './constants';
 import { FP } from './fmath';
 import { Tile, type MapData } from './map/types';
@@ -23,7 +23,15 @@ export interface Player {
   explored: Uint8Array;
   /** Bumped whenever a fog chunk's explored tiles change, so the renderer redraws only that chunk. */
   fogVersion: Uint32Array;
+  /** Units placed by hand, waiting to be made at the Hub (SPEC "Hand-placed units"). */
+  queue: { kind: UnitKind; tile: number }[];
+  /** Out of the match: the Hub was destroyed (SPEC). */
+  eliminated: boolean;
+  /** A CPU player. 'idle' (until Stage 5): it only defends itself. */
+  cpu: 'idle' | null;
 }
+
+export type UnitOrder = { kind: 'move'; tile: number } | { kind: 'attack'; target: number };
 
 export interface Unit {
   id: number;
@@ -48,10 +56,31 @@ export interface Unit {
   dirY: number;
   /** Tile the unit last revealed fog from. */
   seenFrom: number;
+  /** Acting on its own (with an imperative) or waiting for the player's orders (SPEC). */
+  mode: 'auto' | 'directed';
+  imperative: Imperative;
+  /** Where it waits or holds (tile index): its rally spot, or where it was placed by hand. */
+  home: number;
+  /** Patrol points (tile indices), looped in order. */
+  patrol: number[];
+  patrolStep: number;
+  /** The structure that made it, while it still follows that structure's settings (0: none). */
+  source: number;
+  /** The player's last order, until it is carried out. */
+  order: UnitOrder | null;
+  /** What it is fighting (a unit, structure or belt id), or 0. */
+  target: number;
+  /** Ticks until it can hit again. */
+  cooldown: number;
+  /** Tick of its last hit, and of the last time it was hit (for drawing). */
+  lastAttack: number;
+  lastHurt: number;
+  /** The tile it is heading for while chasing, to know when to find a new path. */
+  chaseTile: number;
 }
 
 /** Why a structure is or is not working, for its panel and the icons over it. */
-export type StructureStatus = 'building' | 'working' | 'idle' | 'noRecipe' | 'noInput' | 'outputFull' | 'noPower' | 'blown';
+export type StructureStatus = 'building' | 'working' | 'idle' | 'noRecipe' | 'noInput' | 'outputFull' | 'atLimit' | 'noPower' | 'blown';
 
 export interface Structure {
   id: number;
@@ -84,6 +113,21 @@ export interface Structure {
   grid: number;
   /** Turn-taking among output ports and items. */
   rr: number;
+  /** Deployer, Garage, Landing Pad: the unit it makes (SPEC: one type at a time). */
+  produce: UnitKind | null;
+  /** How its units act (SPEC: per structure), and their imperative. */
+  mode: 'auto' | 'directed';
+  imperative: Imperative;
+  /** Where its units gather (tile index), or -1 for just outside its front. */
+  rally: number;
+  /** Its units' patrol points (tile indices). */
+  patrol: number[];
+  /** Units it has made, to spread them over the tiles around the rally point. */
+  made: number;
+  /** Hub: tick of its last pulse. */
+  lastPulse: number;
+  /** Tick it was last hit (for drawing). */
+  lastHurt: number;
 }
 
 export interface BeltItem {
@@ -105,6 +149,7 @@ export interface Belt {
   items: BeltItem[];
   /** Splitter: which output is next. Merger: the side the last item came from. */
   rr: number;
+  hp: number;
 }
 
 /** A power line between two structures (poles count as structures). */
@@ -151,7 +196,15 @@ export interface MatchState {
   nextId: number;
   rng: number;
   cache: Cache;
+  /** What happened this tick, for drawing (hits, deaths, pulses). Not part of the fingerprint. */
+  events: SimEvent[];
 }
+
+export type SimEvent =
+  | { kind: 'death'; x: number; y: number; owner: number }
+  | { kind: 'destroyed'; x: number; y: number; w: number; h: number }
+  | { kind: 'pulse'; hub: number }
+  | { kind: 'eliminated'; player: number };
 
 export const tileIndex = (s: MatchState, x: number, y: number) => y * s.size + x;
 export const inBounds = (s: MatchState, x: number, y: number) => x >= 0 && y >= 0 && x < s.size && y < s.size;
@@ -198,6 +251,13 @@ export function cache(s: MatchState): Cache {
     c.beltOrder = beltOrder(s, c.beltById);
   }
   return c;
+}
+
+/** How many units a player has (SPEC: the unit limit counts them all). */
+export function unitCountOf(s: MatchState, player: number) {
+  let n = 0;
+  for (const u of s.units) if (u.owner === player) n++;
+  return n;
 }
 
 export function getStructure(s: MatchState, id: number) {

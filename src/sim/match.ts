@@ -1,19 +1,19 @@
-import { STRUCTURES } from './content/structures';
-import { UNITS, type UnitKind } from './content/units';
+import { START_INVENTORY } from './content/economy';
+import type { UnitKind } from './content/units';
 import { HUB_SIGHT } from './constants';
+import { addStructure, addUnit, type UnitSetup } from './factory';
 import { reveal } from './fog';
 import { getMap } from './map/maps';
 import { NODE_SIZE } from './map/types';
 import { spreadTiles } from './path';
 import { nextInt } from './rng';
-import { START_INVENTORY } from './content/economy';
-import { emptyCache, type MatchState, type Player, fogChunks, tileCenter } from './state';
+import { emptyCache, type MatchState, type Player, fogChunks } from './state';
 
 export interface MatchSetup {
   mapId: string;
   /** Picks the start locations. In multiplayer every computer gets the same seed. */
   seed: number;
-  players: { name: string; color: number }[];
+  players: { name: string; color: number; cpu?: 'idle' }[];
 }
 
 /** How many Minutemen each player starts with (SPEC "Hub"). */
@@ -48,6 +48,7 @@ export function createMatch(setup: MatchSetup): MatchState {
     nextId: 1,
     rng: setup.seed | 0,
     cache: emptyCache(),
+    events: [],
   };
 
   // Shuffle the start locations and hand them out in player order.
@@ -67,43 +68,25 @@ export function createMatch(setup: MatchSetup): MatchState {
       hub: { ...START_INVENTORY },
       explored: new Uint8Array(size * size),
       fogVersion: new Uint32Array(fogChunks(size)),
+      queue: [],
+      eliminated: false,
+      cpu: info.cpu ?? null,
     };
     s.players.push(p);
 
-    const hub = STRUCTURES.hub;
-    const hx = start.x - Math.floor(hub.w / 2);
-    const hy = start.y - Math.floor(hub.h / 2);
-    const id = s.nextId++;
-    s.structures.push({ id, owner: p.id, kind: 'hub', x: hx, y: hy, w: hub.w, h: hub.h, rot: 0, hp: hub.hp, buildLeft: 0, buildTotal: 0, recipe: null, inv: {}, out: {}, progress: 0, status: 'working', blown: false, grid: id, rr: 0 });
-    for (let y = hy; y < hy + hub.h; y++) for (let x = hx; x < hx + hub.w; x++) s.occupied[y * size + x] = id;
-    p.hubId = id;
+    const hub = addStructure(s, p.id, 'hub', start.x - 2, start.y - 2, 0, true);
+    p.hubId = hub.id;
     reveal(s, p, start.x, start.y, HUB_SIGHT);
 
-    // The Minutemen stand on the open tiles just in front of the Hub.
-    const front = (hy + hub.h + 1) * size + start.x;
-    for (const t of spreadTiles(s, front, START_MINUTEMEN)) spawnUnit(s, p.id, 'minuteman', t);
+    // The Minutemen stand on the open tiles just in front of the Hub. A player's start with
+    // the player's own orders; an idle CPU's hold their ground.
+    const front = (hub.y + hub.h + 1) * size + start.x;
+    for (const t of spreadTiles(s, front, START_MINUTEMEN)) addUnit(s, p.id, 'minuteman', t, p.cpu ? { mode: 'auto', imperative: 'hold', home: t } : { mode: 'directed', home: t });
   });
   return s;
 }
 
-export function spawnUnit(s: MatchState, owner: number, kind: UnitKind, tile: number) {
-  const x = tileCenter(tile % s.size);
-  const y = tileCenter(Math.floor(tile / s.size));
-  s.units.push({
-    id: s.nextId++,
-    owner,
-    kind,
-    x,
-    y,
-    px: x,
-    py: y,
-    hp: UNITS[kind].hp,
-    path: [],
-    pathStep: 0,
-    goal: -1,
-    pathVersion: 0,
-    dirX: 1,
-    dirY: 1,
-    seenFrom: -1,
-  });
+/** A unit standing on a tile (tests and tools). */
+export function spawnUnit(s: MatchState, owner: number, kind: UnitKind, tile: number, setup: UnitSetup = {}) {
+  return addUnit(s, owner, kind, tile, setup);
 }

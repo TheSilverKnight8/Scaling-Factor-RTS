@@ -2,6 +2,10 @@ import { UNITS } from './content/units';
 import { applyCommand, sendTo, type Command } from './commands';
 import { tickBelts } from './belts';
 import { tickStructures } from './economy';
+import { removeDead, separate, tickArmies } from './army';
+import { buildHealth } from './factory';
+import { tickHubs } from './production';
+import { STRUCTURES } from './content/structures';
 import { reveal } from './fog';
 import { isqrt } from './fmath';
 import { lineClear } from './path';
@@ -9,14 +13,28 @@ import { type MatchState, type Unit, getPlayer, tileCenter, unitTile, walkable }
 
 /**
  * Advances the match by one tick: applies this tick's commands in order, advances building,
- * runs structures (power, work, products out), moves belts, moves units and reveals fog. Nothing else changes the match state.
+ * runs structures (power, work, production), the Hubs' hand-placed units, belts, units
+ * (thinking, fighting, the Hubs' pulses, then moving), removes what was destroyed and reveals
+ * fog. Nothing else changes the match state.
  */
 export function step(s: MatchState, commands: readonly Command[]) {
+  s.events = [];
   for (const c of commands) applyCommand(s, c);
-  for (const t of s.structures) if (t.buildLeft > 0) t.buildLeft--;
+  for (const t of s.structures) {
+    if (t.buildLeft <= 0) continue;
+    // Health grows from a tenth to full while it is built (Caleb).
+    const max = STRUCTURES[t.kind].hp;
+    const done = t.buildTotal - t.buildLeft;
+    t.hp += buildHealth(max, done + 1, t.buildTotal) - buildHealth(max, done, t.buildTotal);
+    t.buildLeft--;
+  }
   tickStructures(s);
+  tickHubs(s);
   tickBelts(s);
+  tickArmies(s);
   for (const u of s.units) moveUnit(s, u);
+  separate(s);
+  removeDead(s);
   for (const u of s.units) {
     const t = unitTile(s, u);
     if (t === u.seenFrom) continue;

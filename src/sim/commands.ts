@@ -1,14 +1,16 @@
 import type { ItemId } from './content/items';
-import { STRUCTURES, footprint, type StructureKind } from './content/structures';
+import { STRUCTURES, type StructureKind } from './content/structures';
 import { POWER_LINE, type TransportKind } from './content/transport';
 import { placeBelts, removeBelts, type BeltTile } from './belts';
-import { TICK_RATE } from './constants';
+import { addStructure } from './factory';
 import { canAfford, contents, giveFromHub, pay, refund, restartGrid, returnBag, setRecipe, takeToHub } from './economy';
 import { FP } from './fmath';
 import { findPath, nearestOpen, spreadTiles } from './path';
 import { canPlace } from './placement';
 import { canConnect, linesOf } from './power';
 import { cache, getPlayer, type MatchState, type Unit, unitTile } from './state';
+import type { Imperative, UnitKind } from './content/units';
+import { placeUnit, setMode, setPatrol, setProduce, setRally } from './production';
 
 // Everything a player does reaches the match as a command, applied at the start of a tick.
 // In multiplayer (Stage 6) only commands travel between computers, so every action must be
@@ -25,7 +27,13 @@ export type Command =
   | { type: 'take'; player: number; id: number; item: ItemId }
   | { type: 'give'; player: number; id: number; item: ItemId }
   | { type: 'recipe'; player: number; id: number; recipe: string | null }
-  | { type: 'restart'; player: number; id: number };
+  | { type: 'restart'; player: number; id: number }
+  | { type: 'attack'; player: number; units: number[]; target: number }
+  | { type: 'produce'; player: number; id: number; unit: UnitKind | null }
+  | { type: 'mode'; player: number; id: number; mode: 'auto' | 'directed'; imperative: Imperative }
+  | { type: 'rally'; player: number; id: number; x: number; y: number }
+  | { type: 'patrol'; player: number; id: number; points: number[] }
+  | { type: 'placeUnit'; player: number; kind: UnitKind; x: number; y: number };
 
 export function applyCommand(s: MatchState, c: Command) {
   switch (c.type) {
@@ -51,6 +59,18 @@ export function applyCommand(s: MatchState, c: Command) {
       return setRecipe(s, c.player, c.id, c.recipe);
     case 'restart':
       return restartGrid(s, c.player, c.id);
+    case 'attack':
+      return attack(s, c.player, c.units, c.target);
+    case 'produce':
+      return setProduce(s, c.player, c.id, c.unit);
+    case 'mode':
+      return setMode(s, c.player, c.id, c.mode, c.imperative);
+    case 'rally':
+      return setRally(s, c.player, c.id, c.x, c.y);
+    case 'patrol':
+      return setPatrol(s, c.player, c.id, c.points);
+    case 'placeUnit':
+      return placeUnit(s, c.player, c.kind, c.x, c.y);
   }
 }
 
@@ -89,7 +109,33 @@ function moveUnits(s: MatchState, player: number, ids: number[], tx: number, ty:
     }
     if (best < 0) best = 0;
     taken[best] = 1;
+    takeCharge(u);
+    u.order = { kind: 'move', tile: slots[best] };
     sendTo(s, u, slots[best]);
+  }
+}
+
+/** A unit the player gives an order to waits for the player's orders from then on. */
+function takeCharge(u: Unit) {
+  u.mode = 'directed';
+  u.source = 0;
+  u.target = 0;
+  u.chaseTile = -1;
+}
+
+/** Ordered units attack a target: an enemy unit, structure or belt (SPEC: units attack structures directly). */
+function attack(s: MatchState, player: number, ids: number[], target: number) {
+  const c = cache(s);
+  const owner = s.units.find((u) => u.id === target)?.owner ?? c.structById.get(target)?.owner ?? c.beltById.get(target)?.owner;
+  if (owner === undefined || owner === player) return;
+  const wanted = new Set(ids);
+  for (const u of s.units) {
+    if (u.owner !== player || !wanted.has(u.id)) continue;
+    takeCharge(u);
+    u.order = { kind: 'attack', target };
+    u.target = target;
+    u.path = [];
+    u.pathStep = 0;
   }
 }
 
@@ -102,13 +148,7 @@ function build(s: MatchState, player: number, kind: StructureKind, x: number, y:
   if (!canPlace(s, player, kind, x, y, r).ok) return;
   if (!canAfford(p, def.cost)) return;
   pay(p, def.cost);
-  const { w, h } = footprint(kind, r);
-  const id = s.nextId++;
-  const buildTotal = def.buildSeconds * TICK_RATE;
-  s.structures.push({ id, owner: player, kind, x, y, w, h, rot: r, hp: def.hp, buildLeft: buildTotal, buildTotal, recipe: null, inv: {}, out: {}, progress: 0, status: 'building', blown: false, grid: id, rr: 0 });
-  for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) s.occupied[yy * s.size + xx] = id;
-  s.blockVersion++;
-  s.powerVersion++;
+  const id = addStructure(s, player, kind, x, y, r, false).id;
   // The player's own units standing there step out to the nearest open tile.
   for (const u of s.units) {
     if (u.owner !== player) continue;

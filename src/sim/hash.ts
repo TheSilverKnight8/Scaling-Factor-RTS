@@ -23,6 +23,12 @@ export function stateHash(s: MatchState): number {
     mix(u.pathStep);
     mix(u.goal);
     for (const t of u.path) mix(t);
+    mix(u.mode === 'auto' ? 1 : 0);
+    mix(u.home);
+    mix(u.target);
+    mix(u.cooldown);
+    mix(u.order ? (u.order.kind === 'move' ? u.order.tile : -u.order.target) : 0);
+    mix(u.patrolStep);
   }
   const bag = (b: Bag) => {
     for (const id of ITEM_IDS) mix(b[id] ?? 0);
@@ -43,11 +49,15 @@ export function stateHash(s: MatchState): number {
     mix(t.rr);
     bag(t.inv);
     bag(t.out);
+    mix(t.rally);
+    mix(t.made);
+    mix(t.lastPulse);
   }
   for (const b of s.belts) {
     mix(b.id);
     mix(b.dir);
     mix(b.rr);
+    mix(b.hp);
     for (const it of b.items) {
       mix(ITEM_IDS.indexOf(it.item));
       mix(it.pos);
@@ -60,6 +70,8 @@ export function stateHash(s: MatchState): number {
   for (const p of s.players) {
     mix(p.id);
     bag(p.hub);
+    mix(p.queue.length);
+    mix(p.eliminated ? 1 : 0);
     let explored = 0;
     for (let i = 0; i < p.explored.length; i++) explored += p.explored[i];
     mix(explored);

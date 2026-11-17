@@ -46,7 +46,7 @@ export function SinglePlayer() {
         <h2 className="flex items-center gap-2 text-2xl">
           CPU opponent <StageTag stage={5} />
         </h2>
-        <p className="mt-2 max-w-2xl text-sm text-muted">The CPU (Easy, Normal, Hard) comes in Stage 5. Until then a match has only you, so you can try the map, the camera, fog, moving units and placing structures.</p>
+        <p className="mt-2 max-w-2xl text-sm text-muted">The CPU (Easy, Normal, Hard) comes in Stage 5. Until then an idle CPU stands at another start location: its Hub and three Minutemen only defend themselves, so there is something to find and fight.</p>
       </section>
 
       <div className="flex flex-wrap gap-3">

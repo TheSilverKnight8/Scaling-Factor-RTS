@@ -4,7 +4,7 @@ import { Game } from '../game/Game';
 import { MatchHud } from '../game/ui/MatchHud';
 import { MAPS } from '../sim/map/maps';
 
-/** A match. Single-player for now: just you on the map until the CPU arrives in Stage 5. */
+/** A match against an idle CPU until the real one arrives in Stage 5. */
 export function Play() {
   const [params] = useSearchParams();
   const mapId = params.get('map') ?? MAPS[0].id;
@@ -14,7 +14,16 @@ export function Play() {
     // The seed only picks start locations; a fresh one each match. Outside the simulation, so
     // Math.random is fine here (in multiplayer the host will choose it and send it to everyone).
     const seed = Math.floor(Math.random() * 0x7fffffff);
-    return new Game({ mapId, seed, players: [{ name: 'You', color: 0 }] });
+    // Until the CPU arrives (Stage 5), an idle CPU stands at another start: its Hub and three
+    // Minutemen only defend themselves, so there is something to fight (Caleb, Stage 3).
+    return new Game({
+      mapId,
+      seed,
+      players: [
+        { name: 'You', color: 0 },
+        { name: 'CPU (idle)', color: 1, cpu: 'idle' },
+      ],
+    });
   }, [mapId, valid]);
   const canvas = useRef<HTMLCanvasElement>(null);
 

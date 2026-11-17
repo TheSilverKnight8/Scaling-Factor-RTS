@@ -1,8 +1,8 @@
 import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowDownToLine, ArrowUpFromLine, Menu, Minus, Plus, Power, RotateCw, Trash2, Unplug, Warehouse } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Menu, Minus, Plus, Power, RotateCw, Trash2, Unplug, Users, Warehouse } from 'lucide-react';
 import { ITEMS } from '../../sim/content/items';
-import { unitCount } from '../../sim/content/units';
+import { IMPERATIVES, unitCount } from '../../sim/content/units';
 import { Button, Kbd, cx } from '../../components/ui';
 import { BUILD_MENU, type BuildEntry, type Game, type HudState, type SelectionInfo } from '../Game';
 import { ItemIcon, ToolIcon } from './Icons';
@@ -40,6 +40,16 @@ export function MatchHud({ game }: { game: Game }) {
         </Panel>
         <div className="flex min-w-0 flex-col items-center gap-2">
           <HubBar hud={hud} />
+          {hud.notices.map((n) => (
+            <Panel key={n} className="border-accent px-4 py-2 font-display text-lg uppercase tracking-wide text-accent">
+              {n}
+            </Panel>
+          ))}
+          {hud.tool && (hud.tool.id === 'placeUnit' || hud.tool.id === 'patrol') && (
+            <Panel className="px-4 py-2 text-sm">
+              {hud.tool.id === 'placeUnit' ? 'Click the map where the unit should go: it is made at the Hub, walks there and holds the spot. Right click or Esc to stop.' : 'Click up to 8 patrol points, in order. Right click or Enter to finish; Esc to cancel.'}
+            </Panel>
+          )}
           {hud.placeError && hud.tool && <Panel className="px-4 py-2 text-sm text-warn">{hud.placeError}</Panel>}
         </div>
         <Panel className="flex shrink-0 items-center gap-1 p-1.5">
@@ -86,6 +96,11 @@ function HubBar({ hud }: { hud: HudState }) {
       ))}
       <span className={cx('font-mono text-[0.6875rem]', full ? 'text-warn' : 'text-muted')} title="Items in the Hub / its capacity">
         {hud.hub.total} / {hud.hub.capacity}
+      </span>
+      <span className="mx-1 h-4 w-px bg-line" />
+      <span className={cx('flex items-center gap-1 text-sm tabular-nums', hud.units >= hud.unitLimit ? 'text-warn' : 'text-ink')} title="Your units / the unit limit (production pauses at it)">
+        <Users className="size-4 text-muted" />
+        {hud.units} / {hud.unitLimit}
       </span>
     </Panel>
   );
@@ -184,8 +199,10 @@ function SelectionPanel({ game, sel, hub }: { game: Game; sel: SelectionInfo | n
       <div>
         <div className="label-caps text-accent">{sel.count === 1 ? 'Unit' : `${sel.count} units`}</div>
         <div className="mt-1 font-display text-2xl uppercase leading-none">{sel.groups.map((g) => unitCount(g.name, g.count)).join(', ')}</div>
+        {!sel.mine && <p className="mt-1 text-sm text-muted">{sel.owner}</p>}
         <Bar value={sel.hp} max={sel.maxHp} label={`${sel.hp} / ${sel.maxHp} health`} />
-        <p className="mt-2 text-xs text-muted">Right-click the map to move.</p>
+        {sel.mine && <p className="mt-2 text-sm">{sel.behavior}</p>}
+        {sel.mine && <p className="mt-2 text-xs text-muted">Right-click an enemy to attack it, or the ground to move there. Ordered units wait for your orders afterwards.</p>}
       </div>
     );
   if (sel.kind === 'node')
@@ -214,7 +231,7 @@ function SelectionPanel({ game, sel, hub }: { game: Game; sel: SelectionInfo | n
 
   return (
     <div>
-      <div className="label-caps text-accent">{sel.isHub ? 'Your Hub' : sel.mine ? 'Your structure' : 'Structure'}</div>
+      <div className="label-caps text-accent">{sel.isHub ? (sel.mine ? 'Your Hub' : `${sel.owner}'s Hub`) : sel.mine ? 'Your structure' : `${sel.owner}'s structure`}</div>
       <div className="mt-1 font-display text-2xl uppercase leading-none">{sel.name}</div>
       <p className="mt-1.5 text-sm text-muted">{sel.blurb}</p>
       {sel.building && <Bar value={sel.building.percent} max={100} accent label={`Building: ${sel.building.percent}%, ${sel.building.secondsLeft} s left`} />}
@@ -224,6 +241,73 @@ function SelectionPanel({ game, sel, hub }: { game: Game; sel: SelectionInfo | n
         <Section title="Inventory">
           <ItemList items={hub.items} empty="Empty." />
           <Bar value={hub.total} max={hub.capacity} accent={hub.total >= hub.capacity} label={`${hub.total} / ${hub.capacity} items`} />
+        </Section>
+      )}
+
+      {sel.place && (
+        <Section title="Place units">
+          {sel.place.options.map((o) => (
+            <Button key={o.kind} size="sm" className="h-auto justify-start py-1.5 text-left" disabled={!o.affordable} onClick={() => game.startPlaceUnit(o.kind)} title="Then click the map where it should go">
+              <span className="flex flex-col items-start normal-case tracking-normal">
+                <span className="font-display uppercase tracking-[0.06em]">{o.name}</span>
+                <span className="font-sans text-xs text-muted">
+                  {o.parts}, {o.seconds} s at the Hub
+                </span>
+              </span>
+            </Button>
+          ))}
+          {sel.place.waiting > 0 && <Bar value={sel.place.percent} max={100} accent label={`${sel.place.waiting} waiting to be made`} />}
+        </Section>
+      )}
+
+      {sel.production && sel.mine && (
+        <Section title="Produces">
+          <div className="flex flex-col gap-1">
+            {sel.production.options.map((o) => (
+              <button
+                key={o.kind}
+                onClick={() => game.setProduce(sel.production!.produce === o.kind ? null : o.kind)}
+                className={cx('rounded-lg border px-2.5 py-1.5 text-left text-xs transition', sel.production!.produce === o.kind ? 'border-accent bg-accent/10' : 'border-line hover:bg-raised')}
+              >
+                <span className="font-medium text-ink">{o.name}</span>
+                <span className="block text-muted">
+                  {o.parts}, {o.seconds} s
+                </span>
+              </button>
+            ))}
+            <span className="text-xs text-muted">More units come with research (Stage 4).</span>
+          </div>
+          {sel.production.produce && sel.production.percent > 0 && <Bar value={sel.production.percent} max={100} accent label={`Making: ${sel.production.percent}%`} />}
+        </Section>
+      )}
+
+      {sel.production && sel.mine && (
+        <Section title="Its units">
+          <div className="inline-flex rounded-xl border border-line bg-raised p-0.5">
+            {(['auto', 'directed'] as const).map((m) => (
+              <button key={m} onClick={() => game.setUnitMode(m, sel.production!.imperative)} className={cx('flex-1 rounded-lg px-3 py-1 text-xs font-medium transition', sel.production!.mode === m ? 'bg-navy text-on-accent' : 'text-muted hover:text-ink')}>
+                {m === 'auto' ? 'Act on their own' : 'Directed'}
+              </button>
+            ))}
+          </div>
+          {sel.production.mode === 'auto' ? (
+            <div className="grid grid-cols-2 gap-1">
+              {IMPERATIVES.map((i) => (
+                <button key={i.id} onClick={() => game.setUnitMode('auto', i.id)} title={i.text} className={cx('rounded-lg border px-2 py-1 text-left text-xs transition', sel.production!.imperative === i.id ? 'border-accent bg-accent/10 font-medium' : 'border-line hover:bg-raised')}>
+                  {i.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted">They wait at the rally point for your orders.</p>
+          )}
+          {sel.production.mode === 'auto' && <p className="text-xs text-muted">{IMPERATIVES.find((i) => i.id === sel.production!.imperative)!.text}</p>}
+          {sel.production.mode === 'auto' && sel.production.imperative === 'patrol' && (
+            <Button size="xs" onClick={() => game.startPatrol()}>
+              Set patrol points ({sel.production.patrolPoints})
+            </Button>
+          )}
+          <p className="text-xs text-muted">Right-click the map to set the rally point (the flag).</p>
         </Section>
       )}
 
@@ -358,7 +442,7 @@ const CONTROLS: [string, string][] = [
   ['Click', 'Select a unit, structure, belt or node'],
   ['Drag', 'Select your units in a box'],
   ['Shift + click or drag', 'Add to the selection'],
-  ['Right click', 'Move the selected units there'],
+  ['Right click', 'With units selected: attack the enemy under the pointer, or move there. With a Deployer selected: set its rally point'],
   ['W A S D or arrows', 'Move the camera'],
   ['Mouse wheel or pinch', 'Zoom in and out toward the pointer'],
   ['+ and -', 'Zoom in and out (or the buttons)'],
@@ -369,6 +453,7 @@ const CONTROLS: [string, string][] = [
   ['R', 'Rotate what is being placed; while dragging a belt, change its bend'],
   ['Right click or Esc', 'Stop building'],
   ['Delete', 'Demolish the selected structure or belt (full refund)'],
+  ['Enter', 'Finish setting patrol points'],
   ['Esc', 'Clear the selection, or open this menu'],
 ];
 

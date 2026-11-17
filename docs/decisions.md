@@ -8,7 +8,7 @@ Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortc
 
 1. **Foundation and the map:** the app shell and main menu; one of the three maps (ground, water, cliffs, nodes with purity, about 6 start locations); the isometric view; the camera (WASD/arrow keys, zoom buttons); fog of war; the Hub and the 3 starting Minutemen with drag-to-select and move orders; placing structures on the grid with the fog, water and cliff rules. **(done; Caleb's checkpoint changes done)**
 2. **The starting economy:** the Hub inventory and its capacity; build costs and full-refund demolition; moving items into the Hub by hand; Drill, Smelter, Constructor and Depot; Belt, Splitter and Merger; Solar Generator, power poles and lines, grids blowing and manual restart; the starting iron and copper recipes. (A Drill's target building is wherever its belts lead, Caleb.) **(done)**
-3. **Units and combat:** Deployer production (one unit type at a time, pausing at the unit limit); hand-placed units from the Hub; units acting on their own or waiting for orders, and the four imperatives; the melee, ranged and air targeting rules; attacking structures; health; the Hub's pulse.
+3. **Units and combat:** Deployer production (one unit type at a time, pausing at the unit limit); hand-placed units from the Hub; units acting on their own or waiting for orders, and the four imperatives; the melee, ranged and air targeting rules; attacking structures; health; the Hub's pulse. **(done)**
 4. **Research and the full content**, in three steps:
    - 4a. The Laboratory and the semi-random tree (different per player, always completable); all materials and the remaining processors; Pump and Pipe; Coal and Fuel Generators, fueled by hand or automatically.
    - 4b. The Garage and Haulers; Rail and Rail Station; the Command Post.
@@ -37,6 +37,10 @@ Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortc
 | Moving items by hand between the Hub and a structure (Stage 2) | Instant, at any distance. |
 | Power lines (Stage 2; the spec has no poles) | Power poles, with lines that connect poles and structures. |
 | Belts and ground units (Stage 2) | Belts block ground units. |
+| Aggressive units with no enemy in sight (Stage 3) | Wait at their structure's rally point. |
+| Hand-placed units once they arrive (Stage 3) | Hold the point (the Hold Point imperative there). |
+| Something to fight before the CPU (Stage 3) | An idle CPU: its Hub and 3 Minutemen at another start location, which only defend themselves, until Stage 5. |
+| Health of a structure being built (Stage 3) | Starts at a tenth and grows as it is built, like StarCraft. |
 
 Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 are under "Stage 2: for Caleb to check".
 
@@ -62,6 +66,21 @@ Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 a
 - **Grids blow easily at the start.** A Drill (5 MW) joined to a single Solar Generator (4 MW) blows that grid at once, and it stays blown until restarted from any structure on it, even after more Solar Generators are joined. That is the spec's rule (current demand over supply); stringing the Solar Generators together before the Drill avoids it.
 - **A structure with no power does nothing**, including a Depot: it neither takes items from belts nor puts them out (SPEC: all structures need power to run). By-hand moves still work.
 
+## Builder's additions in Stage 3 (not named in the spec; easy to remove)
+
+- **Rally points**: right-click the map with a Deployer selected; its units gather there (Caleb's answer names the rally point). Shown as a red flag with a dashed line while it is selected.
+- **Attack orders**: with units selected, right-click an enemy unit, structure or belt. A red ring marks the target.
+- **A unit the player orders waits for the player's orders from then on**, even if it was acting on its own.
+- **Belt tiles can be destroyed** (100 health) by ordering units to attack them, since belts block units; units never pick belts as targets on their own.
+- **Units push apart** when they stand too close, so crowds spread out instead of piling up.
+- **The unit count** next to the Hub's inventory, a notice when a player is out of the match, and dust, debris and a ring for deaths, destroyed structures and the Hub's pulse.
+
+## Stage 3: for Caleb to check
+
+- **Hold Point with melee units.** The spec says Hold Point attacks what is "in range". A Minuteman's range is a strike's reach, so a Minuteman on Hold Point only hits what comes right up to it.
+- **The Hub is hard to take with Minutemen.** 9 Minutemen hitting a Hub took about a third of its health in a minute while its pulse killed 4 of them (SPEC: the Hub is quite resilient).
+- **Changing a Deployer's settings changes its units too**: new mode, imperative, rally point or patrol points apply to the units it already made, except those the player has given orders.
+
 ## Platform
 
 | Item | Choice | Why |
@@ -78,8 +97,8 @@ Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 a
 | --- | --- |
 | Rate | 20 ticks a second, fixed. Drawing runs at the screen's rate and moves units smoothly between ticks. |
 | Numbers | Whole numbers only. A position is in 1/1024 of a tile. No floating-point functions whose last digits can differ between browsers (sine, cosine, powers, Math.random). Maps are laid out with written-out sine and cosine values for multiples of 15 degrees. |
-| Changes | Only `step()` changes the match. Every player action is a command (move, build, demolish, belts, power lines, by-hand moves, recipes, grid restart), applied at the start of the next tick and checked there. |
-| Order in a tick | Commands, building progress, structures (power, then work, then products out of output ports), belts, units, fog. |
+| Changes | Only `step()` changes the match. Every player action is a command (move, attack, build, demolish, belts, power lines, by-hand moves, recipes, grid restart, production, unit mode, rally and patrol points, placing units), applied at the start of the next tick and checked there. |
+| Order in a tick | Commands, building progress, structures (power, then work and production, then products out of output ports), the Hubs' hand-placed units, belts, units thinking and hitting, the Hubs' pulses, units moving, units pushing apart, removing what was destroyed (and players whose Hub fell), fog. |
 | Random numbers | One seeded generator in the match state. The seed picks start locations; in multiplayer the host will choose it. |
 | Fingerprint | `stateHash()` sums up the match each tick; multiplayer will compare it between computers to catch a mismatch early. |
 | Check | `npm run check:sim` builds every map and checks that every start reaches every other start and every node on foot; runs the same 4-player match twice and compares fingerprints every tick; plays the opening from the starting inventory to Iron Plates twice and compares; checks belts, a splitter, a merger taking turns, a grid blowing and restarting, refunds and recipe changes; and runs the load tests below. |
@@ -115,7 +134,7 @@ Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 a
 | Minuteman | 3 tiles a second, sees 8 tiles, 60 health. The Hub sees 13 tiles at the start. Other units' numbers are placeholders until they are built. |
 | Paths | A* over the tile grid in 8 directions, never cutting a blocked corner, then shortened to the turning points. If the target cannot be reached, units go to the reachable tile nearest it. If a structure is built across a path, the unit finds a new one. |
 | Group orders | Units spread over the open tiles nearest the clicked point, one unit per tile, each taking the nearest free spot. |
-| Crowding | Units walk through each other on the way; they only spread out where they stop. To be revisited with combat in Stage 3. |
+| Crowding (Stage 3) | Ground units closer than about half a tile push each other apart a little each tick, never onto blocked ground. Group orders still send each unit to its own tile. |
 
 ## View and controls (Stage 1)
 
@@ -124,10 +143,26 @@ Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 a
 | View | Isometric: a tile is a diamond 64 × 32 pixels at 100%. 100% at the start, centered on your Hub. |
 | Zoom (after Stage 1) | Smooth, from 40% to 200%. The mouse wheel and a trackpad pinch zoom toward the pointer; the on-screen buttons and the + and - keys step by 25% about the screen's center. 40% shows roughly a third of the map's width on a 1440-pixel-wide screen; the minimap shows the rest. A two-finger swipe on a trackpad also zooms, because the browser reports it the same way as a mouse wheel. |
 | Minimap (after Stage 1) | Bottom left, in the same isometric orientation as the main view, so up on the minimap is up on screen. It shows explored ground, water, cliffs and nodes (unexplored is dark), structures and units in their owner's color, and a white box for what the main view shows. Click or drag on it to move the camera there. |
-| Mouse | Left click selects a unit, structure, belt or node; left drag selects your units in a box; Shift adds to the selection. Right click sends the selected units there (StarCraft's buttons). While building: left click places, right click stops. |
-| Keys | W A S D or the arrow keys move the camera; + and - zoom (so do the mouse wheel and a trackpad pinch); H centers on your Hub; 1–7, P, L, B, T and M pick from the build menu; R rotates what is being placed (and, while dragging a belt, which way it bends); Delete demolishes the selected structure or belt; Esc stops building, then clears the selection, then opens the menu. |
+| Mouse | Left click selects a unit, structure, belt or node (other players' too, to look at); left drag selects your units in a box; Shift adds to the selection. Right click: with units selected, attack the enemy under the pointer or move there (StarCraft's buttons); with a Deployer selected, set its rally point. While building or placing units: left click places, right click stops. |
+| Keys | W A S D or the arrow keys move the camera; + and - zoom (so do the mouse wheel and a trackpad pinch); H centers on your Hub; 1–7, P, L, B, T and M pick from the build menu; R rotates what is being placed (and, while dragging a belt, which way it bends); Delete demolishes the selected structure or belt; Enter finishes patrol points; Esc stops building, then clears the selection, then opens the menu. |
 | Menu | Esc or the Menu button. Single-player pauses while it is open (SPEC). Resume, Quit match, and the controls list. |
 | Fog | Unexplored tiles are drawn in a very dark navy. Explored tiles at the edge of the fog get a dark wash. Units reveal fog within their sight as they move; fog never comes back, and explored places show everything (Caleb). |
+
+## Units and combat (Stage 3)
+
+| Item | Choice |
+| --- | --- |
+| Minuteman | 3 Iron Plate + 6 Screws (SPEC: Iron Plate and Screws). 6 s at a Deployer, 3 s at the Hub. 60 health; hits for 6 every second at a strike's reach (melee, SPEC). Other units' numbers are placeholders until research (Stage 4). |
+| Deployer | Choose the unit in its panel (one type at a time, SPEC); it makes them while it has parts and power (10 MW while making). Parts come by belt into its three input ports, or by hand with Add. Changing the unit returns its parts to the Hub. New units appear at its front and go to the rally point (default: just outside its front), spreading over the tiles around it. |
+| Unit limit | 200 units a player (SPEC: about 200). At the limit a Deployer pauses, even part way through a unit, and the Hub stops making placed units; both carry on when the count drops (SPEC). |
+| Placing units by hand | Select the Hub, pick a unit, then click the map; each click places one, paid from the Hub at once (SPEC: they cost something). The Hub makes them one at a time (up to 20 waiting); each walks to its spot and holds it (Caleb). Dashed rings mark where they are headed. |
+| Acting on their own or directed | Set per Deployer (SPEC). Directed units wait at the rally point for orders and hit enemies that come within reach. Units acting on their own follow the Deployer's imperative. |
+| Imperatives | Aggressive: chase and attack anything seen; with nothing in sight, wait at the rally point (Caleb). Hold Point: stay at the rally point and hit what comes in reach. Patrol: loop from the rally point through up to 8 patrol points set from the panel, chasing what they see and going back to the route. Explore: head for the nearest unexplored ground; never fight, and head back home while an armed enemy is in sight. |
+| Targets | The nearest enemy unit the unit can hit, else the nearest enemy structure (SPEC: units attack structures directly), ties to the lower id. Melee units cannot hit air; ranged, both and air units can hit anything (SPEC). Chasers give up 4 tiles past their sight. |
+| Damage | Just damage (SPEC). A unit hit flashes pale; a structure flashes in its band. Health bars show on anything damaged or selected. Destroyed structures leave nothing and give no refund; what they held is lost. |
+| The Hub's pulse | Every 3 s, when an enemy unit is within 4 tiles of the Hub's edge, it hits every enemy unit there for 5 (SPEC: a low-damage pulse). It works without power. |
+| Elimination | When a Hub is destroyed, its player is out and all their units, structures, belts and lines are destroyed (SPEC). The match's end, winner and summary come in Stage 5. |
+| The idle CPU | "CPU (idle)", in orange, at another random start, with the starting Hub and 3 Minutemen on Hold Point. It builds and attacks nothing (Caleb, until Stage 5). |
 
 ## Economy (Stage 2)
 
@@ -170,17 +205,20 @@ Recipes, extraction rates and power use follow Satisfactory, checked against the
 - In-game colors (Caleb after Stage 1: slightly darker and grittier, like StarCraft): simplified real colors, muted and dusty, flat with navy outlines. Dusty olive ground with darker and lighter patches, bare dirt in places, tiny specks of grit, pebbles, grass tufts and small cracks; blue-grey water with paler shallows at the shore; dark grey-brown rock cliffs with grit and cracks; very dark navy fog; a dark backdrop around the map. Ores: iron rust red, copper orange with green flecks, gold yellow with a glint, quartz pale pink crystals, coal near-black, sulfur pale yellow, oil a black pool.
 - Structures are worn grey metal machines with grime toward the bottom of their walls, panel seams, and a band of the owner's color: the Hub's transmitter tower with a blinking light and rings going out (the spec says directives are sent from the Hub), a lattice-tower Drill, a glowing Smelter with a chimney, a Constructor with a moving arm, a Deployer with a hangar door, a wooden-crate Depot, a tilted Solar panel on legs, a domed Laboratory. The structures from later stages are plain boxes until they are built.
 - Belts are dark rubber between metal rails, with chevrons crawling the way they run and a bend where one joins from the side; items ride on them as small pictures (ore rocks, ingot bars, plates, rods, screws, coils). Splitters and mergers are low metal boxes with red arrows for the ways out. Power Poles are posts with a cross arm; lines are dark wires that sag a little. Machines move only while they work (the Drill's bit, the Smelter's glow, the Constructor's arm).
-- Minutemen are stick figures in the owner's color with a helmet, as in Stickman Arena, with a walking stride.
+- Minutemen are stick figures in the owner's color with a helmet, as in Stickman Arena, with a walking stride and a forward strike when they hit.
+- Other players' units and structures show only on explored ground (where explored ground shows everything, Caleb).
 - Player colors: Blue, Orange, Green and Purple, slightly deepened to sit with the darker colors (chosen in the lobby in Stage 6). Red is kept for the interface: selections, warnings, move markers. Single-player is Blue.
 
-## Performance (measured at the end of Stage 2)
+## Performance (measured at the end of Stage 3)
 
 Measured in headless Chromium on this build machine, 1440 × 860 screen, at normal (1×) and high (2×, as on most laptops) pixel density. It draws in software with no graphics card, so a real Chrome should do at least as well.
 
 | Case | Result |
 | --- | --- |
 | Building Basin | About 18 ms. |
-| Simulation, 4 players × 200 units (the unit limit) walking | 0.10 ms a tick on average (worst about 1 ms) of the 50 ms a tick has. |
+| Simulation, 4 players × 200 units (the unit limit) walking in a crowd | About 2 ms a tick on average (worst about 5 ms) of the 50 ms a tick has; most of it is units pushing apart. |
+| Simulation, 4 × 200 Aggressive Minutemen marching to one spot and fighting for a minute | About 1.2 ms a tick on average, worst about 22 ms. |
+| Drawing, about 270 Minutemen fighting on screen at 100% | 1×: 60 frames a second. 2×: about 52. |
 | All 800 units ordered across the map in the same tick | 90–140 ms for that one tick (varies between runs), so the game stutters once. One player ordering 200 units is about a quarter of that. If it shows in play, group orders will share one path search instead of one per unit. |
 | 200 units walking into fog at 100% | 1×: 60 frames a second (56 in the 2.5 s measured). 2×: about 43 (here the ground is drawn tile by tile each frame). |
 | 200% | 60 frames a second at 1× and 2×. |

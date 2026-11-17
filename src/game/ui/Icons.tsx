@@ -74,7 +74,7 @@ export function ToolIcon({ id, color = 0, size = 52 }: { id: ToolId; color?: num
           ctx.fill();
           ctx.stroke();
         }
-      } else {
+      } else if (id !== 'placeUnit' && id !== 'patrol') {
         const { w, h } = footprint(id, 0);
         const height = STRUCTURE_HEIGHT[id] ?? 24;
         fit(ctx, px, -h * HW, -height, w * HW, (w + h) * HH);

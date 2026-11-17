@@ -6,15 +6,16 @@ It is an installable web app (PWA) for computers, hosted on GitHub Pages.
 
 The game is built in stages, each tried before the next starts. What the game does is in [`SPEC.md`](SPEC.md) (Caleb's spec); the stage plan and every choice left to the builder are in [`docs/decisions.md`](docs/decisions.md).
 
-## What is in it so far (Stages 1 and 2)
+## What is in it so far (Stages 1 to 3)
 
 | Area | What it does |
 | --- | --- |
 | Home | Single-player, plus Multiplayer and Settings marked for later stages. |
-| Single-player | Pick a map and start a match. Until the CPU arrives (Stage 5), you are alone on the map. |
+| Single-player | Pick a map and start a match. Until the CPU arrives (Stage 5), an idle CPU stands at another start: its Hub and 3 Minutemen only defend themselves. |
 | The map | Basin: an island around a lake, 192 × 192 tiles, with water, cliff ridges, 60 resource nodes (seven resources, three purities) and six start locations. Isometric view, with a minimap. |
 | Fog of war | Everything starts fogged except around your Hub. Units lift the fog for good as they explore. |
-| Units | Your Hub and 3 Minutemen. Click or drag to select, right-click to send them somewhere. |
+| Units | Click or drag to select; right-click the ground to move or an enemy to attack. Deployers make Minutemen from parts, acting on their own (Aggressive, Hold Point, Patrol, Explore) or waiting for orders at a rally point. Place units by hand from the Hub: made there, they walk to the spot and hold it. Unit limit 200. |
+| Combat | Melee and ranged rules from the spec, health, attacking structures, the Hub's pulse. A player whose Hub is destroyed is out, with everything they had. |
 | The Hub | Your inventory (2,000 items). Structures are paid from it and refunded into it. Move items into it by hand from any structure's panel. |
 | Production | Drills gather ore; Smelters and Constructors run the starting iron and copper recipes (Satisfactory's); Depots store anything. Ports that touch connect directly. |
 | Transport | Belts (drag to lay a line), Splitters and Mergers. Belts block ground units and can cross water. |

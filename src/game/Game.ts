@@ -1,5 +1,5 @@
 import { STRUCTURES, footprint, type Cost, type StructureKind } from '../sim/content/structures';
-import { UNITS } from '../sim/content/units';
+import { IMPERATIVES, UNITS, UNIT_LIST, type Imperative, type UnitKind } from '../sim/content/units';
 import { PURITY_NAMES, RESOURCES } from '../sim/content/resources';
 import { ITEMS, ITEM_IDS, bagTotal, type ItemId } from '../sim/content/items';
 import { RECIPES, RECIPE_LIST } from '../sim/content/recipes';
@@ -7,25 +7,26 @@ import { HUB_CAPACITY } from '../sim/content/economy';
 import { POWER_LINE, TRANSPORT, type TransportKind } from '../sim/content/transport';
 import { canPlaceBelt, newBeltCount, type BeltTile } from '../sim/belts';
 import type { Command } from '../sim/commands';
-import { TICK_MS } from '../sim/constants';
+import { TICK_MS, UNIT_LIMIT } from '../sim/constants';
 import { giveRoom } from '../sim/economy';
 import { FP } from '../sim/fmath';
 import { createMatch, type MatchSetup } from '../sim/match';
 import { canPlace, snapToNode } from '../sim/placement';
 import { canConnect, linesOf } from '../sim/power';
-import { cache, type MatchState, type Player, type StructureStatus } from '../sim/state';
+import { cache, unitCountOf, type MatchState, type Player, type StructureStatus } from '../sim/state';
+import { isProducer, rallyOf } from '../sim/production';
 import { step } from '../sim/step';
 import { BUTTON_ZOOM, MAX_ZOOM, MIN_ZOOM, isoX, isoY, toTile } from '../render/iso';
 import { POLE_TOP, STRUCTURE_HEIGHT, structureHull, type Pt } from '../render/objects';
 import { MinimapRenderer } from '../render/minimap';
-import { Renderer, type BeltGhost, type Ghost, type Marker } from '../render/renderer';
+import { Renderer, type BeltGhost, type Effect, type Ghost, type Marker } from '../render/renderer';
 import { lineAnchor } from '../render/transport';
 import { Camera } from './camera';
 
 // Runs a match on this computer: steps the simulation at a fixed rate, draws it, and turns
 // mouse and keyboard input into commands. Commands are applied at the start of the next tick.
 
-export type ToolId = StructureKind | TransportKind | 'line';
+export type ToolId = StructureKind | TransportKind | 'line' | 'placeUnit' | 'patrol';
 
 export interface BuildEntry {
   id: ToolId;
@@ -67,7 +68,7 @@ export const BUILD_MENU: BuildEntry[] = [
 ];
 
 const isTransport = (id: ToolId): id is TransportKind => id === 'belt' || id === 'splitter' || id === 'merger';
-const isStructureTool = (id: ToolId): id is StructureKind => !isTransport(id) && id !== 'line';
+const isStructureTool = (id: ToolId): id is StructureKind => !isTransport(id) && id !== 'line' && id !== 'placeUnit' && id !== 'patrol';
 
 export interface Tool {
   id: ToolId;
@@ -79,6 +80,11 @@ export interface Tool {
   flip: boolean;
   /** Power line: the structure the line starts from. */
   lineFrom: number | null;
+  /** Placing units by hand: which unit. */
+  unit?: UnitKind;
+  /** Setting patrol points: the structure, and the points so far (tile indices). */
+  structure?: number;
+  points?: number[];
 }
 
 export type Selection = { kind: 'units'; ids: number[] } | { kind: 'structure'; id: number } | { kind: 'node'; id: number } | { kind: 'belt'; id: number } | null;
@@ -90,7 +96,7 @@ export interface ItemCount {
 }
 
 export type SelectionInfo =
-  | { kind: 'units'; count: number; groups: { name: string; count: number }[]; hp: number; maxHp: number }
+  | { kind: 'units'; count: number; groups: { name: string; count: number }[]; hp: number; maxHp: number; mine: boolean; owner: string; behavior: string }
   | {
       kind: 'structure';
       id: number;
@@ -112,6 +118,18 @@ export type SelectionInfo =
       /** Ingredients it takes by hand from the Hub. */
       needs: { item: ItemId; name: string; have: number; inHub: number; room: number }[];
       power: { uses: number; makes: number; supply: number; demand: number; blown: boolean; lines: number; maxLines: number } | null;
+      /** Deployer: what it makes and how its units act. */
+      production: {
+        produce: UnitKind | null;
+        options: { kind: UnitKind; name: string; parts: string; seconds: number }[];
+        percent: number;
+        mode: 'auto' | 'directed';
+        imperative: Imperative;
+        patrolPoints: number;
+      } | null;
+      /** Hub: units that can be placed by hand, and how many are waiting. */
+      place: { options: { kind: UnitKind; name: string; parts: string; seconds: number; affordable: boolean }[]; waiting: number; percent: number } | null;
+      owner: string;
     }
   | { kind: 'node'; resource: string; purity: string; fluid: boolean; rate: string }
   | { kind: 'belt'; id: number; name: string; carrying: ItemCount[] };
@@ -131,6 +149,10 @@ export interface HudState {
   placeError: string | null;
   /** Which build menu entries the Hub can pay for now. */
   affordable: Partial<Record<ToolId, boolean>>;
+  units: number;
+  unitLimit: number;
+  /** Short messages: a player out of the match. */
+  notices: string[];
 }
 
 const STATUS_TEXT: Record<StructureStatus, string> = {
@@ -140,6 +162,7 @@ const STATUS_TEXT: Record<StructureStatus, string> = {
   noRecipe: 'Choose a recipe.',
   noInput: 'Waiting for ingredients.',
   outputFull: 'Output full: take items out or connect a belt.',
+  atLimit: 'Paused: you are at the unit limit.',
   noPower: 'No power: connect it to a generator with power lines.',
   blown: 'Grid blown: demand went over supply. Add power, then restart it.',
 };
@@ -202,6 +225,8 @@ export class Game {
   private pointer = { x: 0, y: 0, inside: false };
   private press: { x: number; y: number; dragging: boolean; shift: boolean } | null = null;
   private markers: Marker[] = [];
+  private effects: Effect[] = [];
+  private notices: { text: string; at: number }[] = [];
   /** When the zoom last changed (ms); pictures are remade at the exact zoom once it settles. */
   private zoomChangedAt = 0;
   private lastZoom = 0;
@@ -272,6 +297,9 @@ export class Game {
       tool: this.tool ? { id: this.tool.id, rot: this.tool.rot, lineFrom: this.tool.lineFrom !== null } : null,
       placeError: this.preview()?.error ?? null,
       affordable,
+      units: unitCountOf(this.state, this.me),
+      unitLimit: UNIT_LIMIT,
+      notices: this.notices.filter((n) => performance.now() - n.at < 6000).map((n) => n.text),
     };
   }
 
@@ -284,12 +312,19 @@ export class Game {
       if (units.length === 0) return null;
       const counts = new Map<string, number>();
       for (const u of units) counts.set(UNITS[u.kind].name, (counts.get(UNITS[u.kind].name) ?? 0) + 1);
+      const first = units[0];
+      const imp = IMPERATIVES.find((i) => i.id === first.imperative)!;
+      const same = units.every((u) => u.mode === first.mode && u.imperative === first.imperative);
+      const behavior = !same ? 'Mixed orders.' : first.mode === 'directed' ? 'Directed: waits for your orders and fights back in reach.' : `On its own: ${imp.name}. ${imp.text}`;
       return {
         kind: 'units',
         count: units.length,
         groups: [...counts].map(([name, count]) => ({ name, count })),
         hp: units.reduce((a, u) => a + u.hp, 0),
         maxHp: units.reduce((a, u) => a + UNITS[u.kind].hp, 0),
+        mine: first.owner === this.me,
+        owner: s.players.find((p) => p.id === first.owner)?.name ?? '',
+        behavior,
       };
     }
     if (sel.kind === 'belt') {
@@ -333,7 +368,34 @@ export class Game {
         }
         power = { uses: def.power, makes: def.powerOut, supply, demand, blown: t.blown, lines: linesOf(s, t.id).length, maxLines: def.maxLines };
       }
+      const production = isProducer(t)
+        ? {
+            produce: t.produce,
+            options: UNIT_LIST.filter((d) => d.atStart && d.producedAt === t.kind).map((d) => ({ kind: d.kind, name: d.name, parts: d.parts.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + '), seconds: d.seconds })),
+            percent: t.produce && t.progress > 0 ? Math.floor((100 * (UNITS[t.produce].seconds * 20 - t.progress)) / (UNITS[t.produce].seconds * 20)) : 0,
+            mode: t.mode,
+            imperative: t.imperative,
+            patrolPoints: t.patrol.length,
+          }
+        : null;
+      const queue = s.players.find((pl) => pl.id === t.owner)?.queue ?? [];
+      const place =
+        t.kind === 'hub' && mine
+          ? {
+              options: UNIT_LIST.filter((d) => d.atStart).map((d) => ({ kind: d.kind, name: d.name, parts: d.parts.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + '), seconds: d.hubSeconds, affordable: d.parts.every(([id, n]) => (p.hub[id] ?? 0) >= n) })),
+              waiting: queue.length,
+              percent: queue.length && t.progress > 0 ? Math.floor((100 * (UNITS[queue[0].kind].hubSeconds * 20 - t.progress)) / (UNITS[queue[0].kind].hubSeconds * 20)) : 0,
+            }
+          : null;
+      const producerNeeds = isProducer(t) && t.produce ? UNITS[t.produce].parts.map(([id]) => ({ item: id, name: ITEMS[id].name, have: t.inv[id] ?? 0, inHub: p.hub[id] ?? 0, room: giveRoom(t, id) })) : [];
+      let statusText = STATUS_TEXT[t.status];
+      if (isProducer(t) && t.status === 'noRecipe') statusText = 'Choose a unit to produce.';
+      if (isProducer(t) && t.status === 'noInput') statusText = 'Waiting for parts (by belt, or Add from the Hub).';
+      if (isProducer(t) && t.status === 'working') statusText = `Making a ${UNITS[t.produce!].name}.`;
       return {
+        production,
+        place,
+        owner: s.players.find((pl) => pl.id === t.owner)?.name ?? '',
         kind: 'structure',
         id: t.id,
         structure: t.kind,
@@ -346,10 +408,10 @@ export class Game {
         canDemolish: mine && t.kind !== 'hub',
         building,
         status: t.status,
-        statusText: STATUS_TEXT[t.status],
+        statusText,
         recipes,
         contents: t.kind === 'hub' ? [] : contents,
-        needs,
+        needs: [...needs, ...producerNeeds],
         power,
       };
     }
@@ -420,6 +482,7 @@ export class Game {
         const cmds = this.queue;
         this.queue = [];
         step(this.state, cmds);
+        this.collectEvents(now);
         this.acc -= TICK_MS;
       }
     }
@@ -429,12 +492,33 @@ export class Game {
     this.refreshHud(false);
   }
 
+  /** Turns what happened in the last tick into effects to draw and notices to show. */
+  private collectEvents(now: number) {
+    const s = this.state;
+    for (const e of s.events) {
+      if (e.kind === 'death') this.effects.push({ kind: 'death', x: e.x / FP, y: e.y / FP, w: 0, h: 0, at: now });
+      else if (e.kind === 'destroyed') this.effects.push({ kind: 'destroyed', x: e.x, y: e.y, w: e.w, h: e.h, at: now });
+      else if (e.kind === 'pulse') this.effects.push({ kind: 'pulse', x: 0, y: 0, w: 0, h: 0, hub: e.hub, at: now });
+      else if (e.kind === 'eliminated') {
+        const p = s.players.find((pl) => pl.id === e.player);
+        this.notices.push({ text: e.player === this.me ? 'Your Hub was destroyed: you are out of the match.' : `${p?.name ?? 'A player'} is out of the match.`, at: now });
+        this.refreshHud();
+      }
+    }
+  }
+
   private draw(now: number) {
     if (!this.ctx) return;
     const pv = this.preview();
     const sel = this.selection;
     const hover = this.hoverTarget();
     this.markers = this.markers.filter((m) => now - m.at < 600);
+    this.effects = this.effects.filter((e) => now - e.at < 1000);
+    // The selected structure's rally point (and patrol points), and where hand-placed units are headed.
+    let rally: { from: number; tile: number; patrol: number[] } | null = null;
+    const picked = sel?.kind === 'structure' ? cache(this.state).structById.get(sel.id) : this.tool?.structure ? cache(this.state).structById.get(this.tool.structure) : undefined;
+    if (picked && picked.owner === this.me && isProducer(picked)) rally = { from: picked.id, tile: rallyOf(this.state, picked), patrol: picked.patrol };
+    const placed = [...this.player.queue.map((q) => q.tile), ...this.state.units.filter((u) => u.owner === this.me && u.mode === 'auto' && u.imperative === 'hold' && !u.source && u.pathStep < u.path.length).map((u) => u.home)];
     if (this.cam.zoom !== this.lastZoom) {
       this.lastZoom = this.cam.zoom;
       this.zoomChangedAt = now;
@@ -457,7 +541,11 @@ export class Game {
       ghost: pv?.ghost ?? null,
       beltGhost: pv?.belts ?? null,
       lineGhost: pv?.line ?? null,
-      showPorts: !!this.tool && this.tool.id !== 'line',
+      showPorts: !!this.tool && isStructureTool(this.tool.id),
+      effects: this.effects,
+      rally,
+      placed,
+      patrolDraft: this.tool?.id === 'patrol' ? (this.tool.points ?? []) : null,
       drag: this.press?.dragging ? { x0: this.press.x, y0: this.press.y, x1: this.pointer.x, y1: this.pointer.y } : null,
       markers: this.markers,
     });
@@ -636,6 +724,8 @@ export class Game {
       if (!error) error = missing(p, TRANSPORT[t.id].cost, newBeltCount(s, tiles));
       return { belts: { kind: t.id, tiles: ghost }, error };
     }
+    if (t.id === 'placeUnit') return { error: t.unit ? missing(p, UNITS[t.unit].parts) : null };
+    if (t.id === 'patrol') return { error: null };
     // Power line.
     const hit = this.pick(this.pointer.x, this.pointer.y);
     const target = hit?.kind === 'structure' ? cache(s).structById.get(hit.id) : undefined;
@@ -693,6 +783,34 @@ export class Game {
 
   removeLines() {
     if (this.selection?.kind === 'structure') this.issue({ type: 'removeLines', player: this.me, id: this.selection.id });
+  }
+
+  setProduce(unit: UnitKind | null) {
+    if (this.selection?.kind === 'structure') this.issue({ type: 'produce', player: this.me, id: this.selection.id, unit });
+  }
+
+  setUnitMode(mode: 'auto' | 'directed', imperative: Imperative) {
+    if (this.selection?.kind === 'structure') this.issue({ type: 'mode', player: this.me, id: this.selection.id, mode, imperative });
+  }
+
+  /** Placing units by hand (SPEC): pick a unit, then click the map where it should go. */
+  startPlaceUnit(unit: UnitKind) {
+    this.tool = { id: 'placeUnit', rot: 0, dragFrom: null, flip: false, lineFrom: null, unit };
+    this.refreshHud();
+  }
+
+  /** Setting patrol points for the selected production structure: click points, right click or Enter to finish. */
+  startPatrol() {
+    if (this.selection?.kind !== 'structure') return;
+    this.tool = { id: 'patrol', rot: 0, dragFrom: null, flip: false, lineFrom: null, structure: this.selection.id, points: [] };
+    this.refreshHud();
+  }
+
+  private finishPatrol() {
+    const t = this.tool;
+    if (t?.id === 'patrol' && t.structure) this.issue({ type: 'patrol', player: this.me, id: t.structure, points: t.points ?? [] });
+    this.tool = null;
+    this.refreshHud();
   }
 
   // ------------------------------------------------------------- picking
@@ -755,12 +873,13 @@ export class Game {
     const y = e.clientY - r.top;
     this.pointer = { x, y, inside: true };
     if (e.button === 2) {
-      // Right button: stop building, or order the selected units to the spot.
+      // Right button: finish patrol points, stop building, or give an order.
+      if (this.tool?.id === 'patrol') return this.finishPatrol();
       if (this.tool) {
         this.cancelTool();
         return;
       }
-      this.orderMove(x, y);
+      this.orderRight(x, y);
       return;
     }
     if (e.button !== 0) return;
@@ -773,6 +892,16 @@ export class Game {
         this.canvas!.setPointerCapture(e.pointerId);
       } else if (t.id === 'line') {
         this.clickLine(x, y);
+      } else if (t.id === 'placeUnit' || t.id === 'patrol') {
+        const [fx, fy] = this.tileAt(x, y);
+        const tx = Math.floor(fx);
+        const ty = Math.floor(fy);
+        if (tx >= 0 && ty >= 0 && tx < this.state.size && ty < this.state.size) {
+          if (t.id === 'placeUnit' && t.unit) {
+            this.issue({ type: 'placeUnit', player: this.me, kind: t.unit, x: tx, y: ty });
+            this.markers.push({ x: tx, y: ty, at: performance.now() });
+          } else if (t.points && t.points.length < 8) t.points.push(ty * this.state.size + tx);
+        }
       } else {
         const pv = this.preview();
         if (pv?.ghost?.ok) this.issue({ type: 'build', player: this.me, kind: pv.ghost.kind, x: pv.ghost.x, y: pv.ghost.y, rot: pv.ghost.rot });
@@ -860,11 +989,47 @@ export class Game {
     }
   }
 
-  private orderMove(x: number, y: number) {
+  /**
+   * Right click: with units selected, attack the enemy under the pointer or move there; with a
+   * production structure selected, set its rally point.
+   */
+  private orderRight(x: number, y: number) {
     const sel = this.selection;
+    if (sel?.kind === 'structure') {
+      const t = cache(this.state).structById.get(sel.id);
+      if (!t || t.owner !== this.me || !isProducer(t)) return;
+      const [fx, fy] = this.tileAt(x, y);
+      const tx = Math.floor(fx);
+      const ty = Math.floor(fy);
+      if (tx < 0 || ty < 0 || tx >= this.state.size || ty >= this.state.size) return;
+      this.issue({ type: 'rally', player: this.me, id: t.id, x: tx, y: ty });
+      this.markers.push({ x: tx, y: ty, at: performance.now() });
+      return;
+    }
     if (sel?.kind !== 'units') return;
     const ids = sel.ids.filter((id) => this.state.units.some((u) => u.id === id && u.owner === this.me));
     if (!ids.length) return;
+    // An enemy under the pointer: attack it.
+    const hit = this.pick(x, y);
+    const c = cache(this.state);
+    let target = 0;
+    let owner = this.me;
+    if (hit?.kind === 'units') {
+      const u = this.state.units.find((o) => o.id === hit.ids[0]);
+      if (u) [target, owner] = [u.id, u.owner];
+    } else if (hit?.kind === 'structure') {
+      const t = c.structById.get(hit.id);
+      if (t) [target, owner] = [t.id, t.owner];
+    } else if (hit?.kind === 'belt') {
+      const b = c.beltById.get(hit.id);
+      if (b) [target, owner] = [b.id, b.owner];
+    }
+    if (target && owner !== this.me) {
+      this.issue({ type: 'attack', player: this.me, units: ids, target });
+      const [fx, fy] = this.tileAt(x, y);
+      this.markers.push({ x: Math.floor(fx), y: Math.floor(fy), at: performance.now(), kind: 'attack' });
+      return;
+    }
     const [tx, ty] = this.tileAt(x, y);
     const ix = Math.floor(tx);
     const iy = Math.floor(ty);
@@ -887,6 +1052,7 @@ export class Game {
       return;
     }
     if (this.menuOpen) return;
+    if ((e.code === 'Enter' || e.code === 'NumpadEnter') && this.tool?.id === 'patrol') return this.finishPatrol();
     if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
       e.preventDefault();
       this.keys.add(e.code);

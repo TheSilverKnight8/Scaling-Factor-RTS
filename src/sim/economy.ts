@@ -6,7 +6,9 @@ import { TICK_RATE } from './constants';
 import { DIRECT_PERIOD } from './content/transport';
 import { deliver, powered } from './flow';
 import { gridSupply, updateGrids } from './power';
-import { cache, getPlayer, type MatchState, type Player, type Structure } from './state';
+import { cache, getPlayer, unitCountOf, type MatchState, type Player, type Structure } from './state';
+import { isProducer, partsInProgress, producerRoom, producerWants, producerWork } from './production';
+import { UNIT_LIMIT } from './constants';
 
 // Structures at work: power for each grid, Drills gathering, Smelters and Constructors running
 // their recipes, and products going out through output ports. Also what the player does by
@@ -16,6 +18,7 @@ const isMachine = (t: Structure) => t.kind === 'smelter' || t.kind === 'construc
 
 /** Whether a structure would draw power this tick (SPEC: a grid blows on current demand). */
 function wantsToWork(s: MatchState, t: Structure): boolean {
+  if (isProducer(t)) return producerWants(s, t);
   if (t.kind === 'drill') return bagTotal(t.out) < DRILL_BUFFER;
   if (t.kind === 'depot') return true;
   if (isMachine(t)) {
@@ -80,7 +83,8 @@ export function tickStructures(s: MatchState) {
       continue;
     }
     if (!wants.get(t.id)) {
-      t.status = isMachine(t) ? (!t.recipe ? 'noRecipe' : t.progress === 0 && !inputsReady(t) ? 'noInput' : 'outputFull') : t.kind === 'drill' ? 'outputFull' : 'idle';
+      if (isProducer(t)) t.status = !t.produce ? 'noRecipe' : unitCountOf(s, t.owner) >= UNIT_LIMIT ? 'atLimit' : 'noInput';
+      else t.status = isMachine(t) ? (!t.recipe ? 'noRecipe' : t.progress === 0 && !inputsReady(t) ? 'noInput' : 'outputFull') : t.kind === 'drill' ? 'outputFull' : 'idle';
       continue;
     }
     t.status = 'working';
@@ -119,6 +123,7 @@ function firstItem(b: Bag): ItemId | undefined {
 }
 
 function work(s: MatchState, t: Structure) {
+  if (isProducer(t)) return producerWork(s, t);
   if (t.kind === 'drill') {
     const node = s.map.nodes[s.nodeAt[t.y * s.size + t.x] - 1];
     if (!node) return;
@@ -171,6 +176,7 @@ export function contents(t: Structure): Bag {
     if (n) all[id] = n;
   }
   if (isMachine(t) && t.progress > 0 && t.recipe) for (const [id, n] of RECIPES[t.recipe].inputs) bagAdd(all, id, n);
+  for (const [id, n] of partsInProgress(t)) bagAdd(all, id, n);
   return all;
 }
 
@@ -194,6 +200,7 @@ export function takeToHub(s: MatchState, player: number, id: number, item: ItemI
 /** How many of an item a structure would take by hand from the Hub now. */
 export function giveRoom(t: Structure, item: ItemId): number {
   if (t.buildLeft > 0) return 0;
+  if (isProducer(t)) return producerRoom(t, item);
   if (isMachine(t)) {
     const r = t.recipe ? RECIPES[t.recipe] : undefined;
     const need = r?.inputs.find(([i]) => i === item);
