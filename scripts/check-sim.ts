@@ -9,7 +9,7 @@ import { FP } from '../src/sim/fmath.ts';
 import { createMatch, spawnUnit } from '../src/sim/match.ts';
 import { UNITS } from '../src/sim/content/units.ts';
 import { PULSE_DAMAGE, UNIT_LIMIT } from '../src/sim/constants.ts';
-import { unitTile as unitTileOf } from '../src/sim/state.ts';
+import { unitTile as unitTileOf, walkable } from '../src/sim/state.ts';
 import { spreadTiles } from '../src/sim/path.ts';
 import { step } from '../src/sim/step.ts';
 import { stateHash } from '../src/sim/hash.ts';
@@ -17,6 +17,7 @@ import type { Command } from '../src/sim/commands.ts';
 import { DX, DY, STRUCTURES, portsOf, type StructureKind } from '../src/sim/content/structures.ts';
 import { canPlace } from '../src/sim/placement.ts';
 import { canPlaceBelt } from '../src/sim/belts.ts';
+import { canPlaceRail } from '../src/sim/rail.ts';
 import { BUNDLES, BUNDLE_LIST } from '../src/sim/content/research.ts';
 import { RECIPE_LIST } from '../src/sim/content/recipes.ts';
 import { ITEM_LIST } from '../src/sim/content/items.ts';
@@ -763,6 +764,170 @@ const near = (s: ReturnType<typeof createMatch>, tile: number, n: number) => spr
   const near = s.units.filter((u) => Math.max(Math.abs(Math.floor(u.x / FP) - cx), Math.abs(Math.floor(u.y / FP) - cy)) <= 6).length;
   if (inside > 0 || near < 10 || ms > 40) fail(`walled off: ${inside} units got inside the ring, ${near} stopped next to it, the order took ${ms.toFixed(1)} ms`);
   else console.log(`Walled off: 120 units ordered inside a ring of belts; the order took ${ms.toFixed(1)} ms, none got in, ${near} stopped right outside.`);
+}
+
+// Stage 4b: Haulers, the Command Post, rails and trains.
+{
+  const setup = (seed: number) => {
+    const s = createMatch({ mapId: 'basin', seed, players: [{ name: 'A', color: 0 }, { name: 'B', color: 1, cpu: 'idle' }] });
+    const me = s.players[0];
+    me.explored.fill(1);
+    me.researched = BUNDLE_LIST.filter((x) => isReady(x)).map((x) => x.id);
+    me.hub = { ironPlate: 3000, ironRod: 2000, screws: 3000, wire: 3000, cable: 2000, reinforcedIronPlate: 500, rotor: 500, modularFrame: 200, motor: 300, steelPipe: 800, steelBeam: 800, coal: 400 };
+    return s;
+  };
+  const runFor = (s: ReturnType<typeof createMatch>, ticks: number, cmds: Command[] = []) => {
+    step(s, cmds);
+    for (let i = 1; i < ticks; i++) step(s, []);
+  };
+  /** A free spot for a structure near (cx, cy), keeping a tile of room around it and around `avoid`. */
+  const spotNear = (s: ReturnType<typeof createMatch>, kind: StructureKind, cx: number, cy: number, avoid: { x: number; y: number; w: number; h: number }[], from = 3) => {
+    const d = STRUCTURES[kind];
+    for (let r = from; r < 50; r++)
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          const x = cx + dx;
+          const y = cy + dy;
+          if (avoid.some((a) => x < a.x + a.w + 1 && x + d.w + 1 > a.x && y < a.y + a.h + 1 && y + d.h + 1 > a.y)) continue;
+          if (canPlace(s, 1, kind, x, y, 0).ok) {
+            avoid.push({ x, y, w: d.w, h: d.h });
+            return { x, y };
+          }
+        }
+    throw new Error('no spot for ' + kind);
+  };
+  const build = (s: ReturnType<typeof createMatch>, kind: StructureKind, at: { x: number; y: number }, rot = 0) => {
+    runFor(s, 1, [{ type: 'build', player: 1, kind, x: at.x, y: at.y, rot }]);
+    const t = s.structures[s.structures.length - 1];
+    if (t.kind !== kind) throw new Error('not built: ' + kind);
+    return t;
+  };
+
+  // Haulers: a Garage with a route makes Haulers that carry Iron Ore from a node to a Depot.
+  const haulRun = () => {
+    const s = setup(51);
+    const hub = s.structures.find((t) => t.owner === 1 && t.kind === 'hub')!;
+    const used = [{ x: hub.x, y: hub.y, w: hub.w, h: hub.h }];
+    const node = s.map.nodes.filter((n) => n.resource === 'iron').sort((a, b) => Math.abs(a.x - hub.x) + Math.abs(a.y - hub.y) - (Math.abs(b.x - hub.x) + Math.abs(b.y - hub.y)))[0];
+    used.push({ x: node.x - 1, y: node.y - 1, w: 4, h: 4 });
+    const garage = build(s, 'garage', spotNear(s, 'garage', hub.x + 8, hub.y, used));
+    const depot = build(s, 'depot', spotNear(s, 'depot', node.x, node.y, used, 6));
+    const sols = [0, 1, 2, 3, 4, 5].map(() => build(s, 'solar', spotNear(s, 'solar', garage.x, garage.y, used)));
+    const sol2 = build(s, 'solar', spotNear(s, 'solar', depot.x, depot.y, used));
+    runFor(s, 20 * 11);
+    const lines: Command[] = [];
+    for (let i = 0; i < sols.length; i++) lines.push({ type: 'line', player: 1, a: sols[i].id, b: i === 0 ? garage.id : sols[i - 1].id });
+    lines.push({ type: 'line', player: 1, a: sol2.id, b: depot.id });
+    for (const l of lines) runFor(s, 1, [l]);
+    // The Hub is never a target (SPEC).
+    runFor(s, 1, [{ type: 'garageRoute', player: 1, id: garage.id, node: node.id, target: hub.id }]);
+    const refusedHub = garage.haul === null;
+    runFor(s, 1, [{ type: 'garageRoute', player: 1, id: garage.id, node: node.id, target: depot.id }, { type: 'produce', player: 1, id: garage.id, unit: 'hauler' }]);
+    for (let k = 0; k < 4; k++) runFor(s, 1, [{ type: 'give', player: 1, id: garage.id, item: k % 2 ? 'rotor' : 'ironPlate' }]);
+    runFor(s, 20 * 90);
+    const haulers = s.units.filter((u) => u.kind === 'hauler' && u.owner === 1);
+    return { s, refusedHub, haulers: haulers.length, ore: depot.inv.ironOre ?? 0, carrying: haulers.map((u) => u.carry), hash: stateHash(s), node, depot };
+  };
+  const h1 = haulRun();
+  const h2 = haulRun();
+  // A Normal node gives 60 a minute, one Hauler loading at a time.
+  if (!h1.refusedHub || h1.haulers < 2 || h1.ore < 30 || h1.hash !== h2.hash) fail(`haulers: Hub refused ${h1.refusedHub}; ${h1.haulers} Haulers; ${h1.ore} Iron Ore reached the Depot; carrying ${h1.carrying.join(',')}; runs identical ${h1.hash === h2.hash}`);
+  else console.log(`Haulers: a Garage with a route made ${h1.haulers} Haulers that carried ${h1.ore} Iron Ore from a node (purity ${h1.node.purity}) to a Depot in 90 s, no belts; the Hub was refused as a target; two runs identical.`);
+  {
+    // A move order takes a Hauler off its route; a route given to it directly puts it back.
+    const s = h1.s;
+    const u = s.units.find((x) => x.kind === 'hauler')!;
+    runFor(s, 1, [{ type: 'move', player: 1, units: [u.id], tx: Math.floor(u.x / FP) + 3, ty: Math.floor(u.y / FP) }]);
+    const off = u.haul === null;
+    runFor(s, 1, [{ type: 'haulRoute', player: 1, units: [u.id], node: h1.node.id, target: h1.depot.id }]);
+    if (!off || !u.haul || u.source !== 0) fail(`haulers: move order cleared the route ${off}; own route ${JSON.stringify(u.haul)}`);
+    else console.log('Haulers: a move order took one off its route; a route given to it directly put it back on, its own from then on.');
+  }
+
+  // Command Posts: units acting on their own that come into a post's radius go on to its waypoint; chained.
+  {
+    const s = setup(52);
+    const hub = s.structures.find((t) => t.owner === 1 && t.kind === 'hub')!;
+    const used = [{ x: hub.x, y: hub.y, w: hub.w, h: hub.h }];
+    const postA = build(s, 'commandPost', spotNear(s, 'commandPost', hub.x + 10, hub.y + 10, used));
+    const postB = build(s, 'commandPost', spotNear(s, 'commandPost', postA.x + 14, postA.y, used));
+    const solA = build(s, 'solar', spotNear(s, 'solar', postA.x, postA.y, used));
+    const solB = build(s, 'solar', spotNear(s, 'solar', postB.x, postB.y, used));
+    runFor(s, 20 * 7);
+    runFor(s, 1, [{ type: 'line', player: 1, a: solA.id, b: postA.id }]);
+    runFor(s, 1, [{ type: 'line', player: 1, a: solB.id, b: postB.id }]);
+    const wB = { x: postB.x + 1, y: postB.y - 3 };
+    const wFinal = { x: postB.x + 16, y: postB.y };
+    runFor(s, 1, [{ type: 'waypoint', player: 1, id: postA.id, x: wB.x, y: wB.y }, { type: 'waypoint', player: 1, id: postB.id, x: wFinal.x, y: wFinal.y }]);
+    const near = spreadTiles(s, (postA.y + 3) * s.size + postA.x + 1, 5);
+    const ids = near.slice(0, 4).map((t) => spawnUnit(s, 1, 'minuteman', t, { mode: 'auto', imperative: 'aggressive', home: t }).id);
+    const patroller = spawnUnit(s, 1, 'minuteman', near[4], { mode: 'auto', imperative: 'patrol', home: near[4] });
+    runFor(s, 20 * 30);
+    const d = (u: { x: number; y: number }, w: { x: number; y: number }) => Math.max(Math.abs(Math.floor(u.x / FP) - w.x), Math.abs(Math.floor(u.y / FP) - w.y));
+    const arrived = s.units.filter((u) => ids.includes(u.id) && d(u, wFinal) <= 5).length;
+    if (postA.status !== 'working' || arrived < 4 || patroller.lastPost !== 0) fail(`command post: status ${postA.status}; ${arrived} of 4 reached the second post's waypoint; patrol unit sent on ${patroller.lastPost !== 0}`);
+    else console.log('Command Post: 4 Aggressive units near a post went on to its waypoint, inside a second post, which sent them on to its own; a Patrol unit kept its route.');
+  }
+
+  // Rails: two Rail Stations joined by track, a train with a stop list carrying solids and fluids.
+  const railRun = () => {
+    const s = setup(53);
+    const hub = s.structures.find((t) => t.owner === 1 && t.kind === 'hub')!;
+    // A straight run: station A (4 x 3), 20 rail tiles, station B, all on open ground.
+    const L = 20;
+    let at: { x: number; y: number } | null = null;
+    for (let r = 8; r < 60 && !at; r++)
+      for (let dy = -r; dy <= r && !at; dy++)
+        for (let dx = -r; dx <= r && !at; dx++) {
+          const x = hub.x + dx;
+          const y = hub.y + dy;
+          if (!canPlace(s, 1, 'railStation', x, y, 0).ok || !canPlace(s, 1, 'railStation', x + 4 + L, y, 0).ok) continue;
+          let ok = true;
+          for (let k = 0; k < L && ok; k++) if (!canPlaceRail(s, 1, x + 4 + k, y + 1).ok) ok = false;
+          if (ok) at = { x, y };
+        }
+    if (!at) throw new Error('no room for rails');
+    const used = [{ x: at.x, y: at.y - 1, w: 8 + L, h: 5 }, { x: hub.x, y: hub.y, w: hub.w, h: hub.h }];
+    const A = build(s, 'railStation', at);
+    const B = build(s, 'railStation', { x: at.x + 4 + L, y: at.y });
+    const tiles = Array.from({ length: L }, (_, k) => ({ x: at!.x + 4 + k, y: at!.y + 1 }));
+    runFor(s, 1, [{ type: 'rails', player: 1, tiles }]);
+    const genA = build(s, 'coalGenerator', spotNear(s, 'coalGenerator', A.x, A.y - 4, used));
+    const genB = build(s, 'coalGenerator', spotNear(s, 'coalGenerator', B.x, B.y - 4, used));
+    runFor(s, 20 * 9);
+    for (const c of [
+      { type: 'line', player: 1, a: genA.id, b: A.id },
+      { type: 'line', player: 1, a: genB.id, b: B.id },
+      { type: 'give', player: 1, id: genA.id, item: 'coal' },
+      { type: 'give', player: 1, id: genB.id, item: 'coal' },
+    ] as Command[])
+      runFor(s, 1, [c]);
+    // Cargo waiting at A (as if it came in through A's ports).
+    A.inv = { ironPlate: 300, fuel: 100 };
+    runFor(s, 1, [{ type: 'addTrain', player: 1, station: A.id }]);
+    const train = s.trains[0];
+    runFor(s, 1, [{ type: 'trainStops', player: 1, id: train.id, stops: [{ station: A.id, load: true, unload: false }, { station: B.id, load: false, unload: true }] }]);
+    runFor(s, 20 * 20);
+    const railTile = tiles[5].y * s.size + tiles[5].x;
+    return { s, A, B, plates: B.out.ironPlate ?? 0, fuel: B.out.fuel ?? 0, walk: walkable(s, railTile), hash: stateHash(s), train, tiles };
+  };
+  const r1 = railRun();
+  const r2 = railRun();
+  if (r1.plates !== 300 || r1.fuel !== 100 || !r1.walk || r1.hash !== r2.hash) fail(`rails: B got ${r1.plates} Iron Plate and ${r1.fuel} Fuel (A ${r1.A.status}, B ${r1.B.status}); units can cross rails ${r1.walk}; runs identical ${r1.hash === r2.hash}`);
+  else {
+    // Cutting the track stops the train; mending it lets it go on.
+    const s = r1.s;
+    const mid = s.rails.find((r) => r.x === r1.tiles[10].x && r.y === r1.tiles[10].y)!;
+    runFor(s, 1, [{ type: 'removeRails', player: 1, ids: [mid.id] }]);
+    r1.A.inv = { ironPlate: 50 };
+    runFor(s, 20 * 15);
+    const stuck = r1.train.noWay && (r1.B.out.ironPlate ?? 0) === 300;
+    runFor(s, 1, [{ type: 'rails', player: 1, tiles: [{ x: mid.x, y: mid.y }] }]);
+    runFor(s, 20 * 15);
+    const after = r1.B.out.ironPlate ?? 0;
+    if (!stuck || after !== 350) fail(`rails: with a rail cut the train was stuck ${stuck}; after mending B has ${after} Iron Plate`);
+    else console.log(`Rails: a train with a stop list (load at A, unload at B) carried 300 Iron Plate and 100 Fuel along 20 tiles of rail; units can cross rails; cutting the track stopped it and mending it let it on; two runs identical.`);
+  }
 }
 
 // Load: 4 players with 200 units each (the unit limit), all ordered across the map at once.

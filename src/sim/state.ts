@@ -88,6 +88,23 @@ export interface Unit {
   lastHurt: number;
   /** The tile it is heading for while chasing, to know when to find a new path. */
   chaseTile: number;
+  /** Hauler: the node it gathers from and the building it delivers to (SPEC), or null. */
+  haul: HaulRoute | null;
+  /** Hauler: 0 heading for the node or loading there, 1 heading for the building or unloading. */
+  haulState: number;
+  /** Hauler: what it carries now, and how many. */
+  carryItem: ItemId | null;
+  carry: number;
+  /** Hauler: ticks toward the next item while loading. */
+  haulTicks: number;
+  /** The last Command Post that sent it on (0: none), so the same post does not send it twice. */
+  lastPost: number;
+}
+
+/** A Hauler's route: a node id and a structure id (0 when not set). */
+export interface HaulRoute {
+  node: number;
+  target: number;
 }
 
 /** Why a structure is or is not working, for its panel and the icons over it. */
@@ -141,6 +158,53 @@ export interface Structure {
   lastHurt: number;
   /** Coal and Fuel Generators: energy left from the fuel burning now, in MW·ticks. */
   energy: number;
+  /** Garage: the route it gives the Haulers it makes (Caleb), or null. */
+  haul: HaulRoute | null;
+  /** Command Post: where units coming into its radius are sent (tile index), or -1 (Caleb: a standing waypoint). */
+  waypoint: number;
+}
+
+/** One tile of rail (SPEC "Transport"). Units can cross rails (Caleb). */
+export interface Rail {
+  id: number;
+  owner: number;
+  x: number;
+  y: number;
+  hp: number;
+}
+
+/** A stop in a train's list (Caleb: a train with a stop list): a Rail Station, and what to do there. */
+export interface TrainStop {
+  station: number;
+  load: boolean;
+  unload: boolean;
+}
+
+/** A train: it runs on its owner's rails from stop to stop, carrying solids and fluids (Caleb). */
+export interface Train {
+  id: number;
+  owner: number;
+  /** Position in sub-units, and at the end of the previous tick (for drawing). */
+  x: number;
+  y: number;
+  px: number;
+  py: number;
+  /** Last direction moved, for drawing. */
+  dirX: number;
+  dirY: number;
+  stops: TrainStop[];
+  /** Index of the stop it is heading for or standing at. */
+  next: number;
+  /** Rail tiles still ahead (tile indices), from pathStep on. */
+  path: number[];
+  pathStep: number;
+  /** railVersion when the path was found (-1: find it now). */
+  pathVersion: number;
+  /** No way along the track to the next stop, last time it looked. */
+  noWay: boolean;
+  /** Ticks left standing at a stop (0: moving or waiting for a way). */
+  dwell: number;
+  cargo: Bag;
 }
 
 export interface BeltItem {
@@ -182,6 +246,8 @@ export interface Cache {
   beltById: Map<number, Belt>;
   /** Belts in the order they move: those nearest the end of a line first. */
   beltOrder: Belt[];
+  railVersion: number;
+  railById: Map<number, Rail>;
 }
 
 export interface MatchState {
@@ -198,6 +264,8 @@ export interface MatchState {
   blockVersion: number;
   /** Bumped when belts change. */
   transportVersion: number;
+  /** Bumped when rails or Rail Stations change, so trains find their way again. */
+  railVersion: number;
   /** Bumped when power lines or structures change, so grids are worked out again. */
   powerVersion: number;
   gridVersion: number;
@@ -206,6 +274,10 @@ export interface MatchState {
   structures: Structure[];
   belts: Belt[];
   lines: PowerLine[];
+  rails: Rail[];
+  /** Rail id on each tile, 0 if none. */
+  railAt: Int32Array;
+  trains: Train[];
   nextId: number;
   rng: number;
   cache: Cache;
@@ -247,7 +319,7 @@ export function getPlayer(s: MatchState, id: number) {
 }
 
 export function emptyCache(): Cache {
-  return { blockVersion: -1, transportVersion: -1, structById: new Map(), ports: new Map(), beltById: new Map(), beltOrder: [] };
+  return { blockVersion: -1, transportVersion: -1, structById: new Map(), ports: new Map(), beltById: new Map(), beltOrder: [], railVersion: -1, railById: new Map() };
 }
 
 /** The derived lookups, rebuilt first if the structures or belts changed. */
@@ -262,6 +334,10 @@ export function cache(s: MatchState): Cache {
     c.transportVersion = s.transportVersion;
     c.beltById = new Map(s.belts.map((b) => [b.id, b]));
     c.beltOrder = beltOrder(s, c.beltById);
+  }
+  if (c.railVersion !== s.railVersion) {
+    c.railVersion = s.railVersion;
+    c.railById = new Map(s.rails.map((r) => [r.id, r]));
   }
   return c;
 }

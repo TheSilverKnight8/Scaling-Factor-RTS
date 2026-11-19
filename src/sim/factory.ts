@@ -1,7 +1,7 @@
 import { STRUCTURES, footprint, type StructureKind } from './content/structures';
 import { UNITS, type Imperative, type UnitKind } from './content/units';
 import { TICK_RATE } from './constants';
-import { tileCenter, type MatchState, type Structure, type Unit } from './state';
+import { tileCenter, type HaulRoute, type MatchState, type Structure, type Unit } from './state';
 
 // Making new structures and units, with every field set, in one place.
 
@@ -40,11 +40,14 @@ export function addStructure(s: MatchState, owner: number, kind: StructureKind, 
     lastPulse: -1000,
     lastHurt: -1000,
     energy: 0,
+    haul: null,
+    waypoint: -1,
   };
   s.structures.push(t);
   for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) s.occupied[yy * s.size + xx] = id;
   s.blockVersion++;
   s.powerVersion++;
+  if (kind === 'railStation') s.railVersion++;
   return t;
 }
 
@@ -59,6 +62,7 @@ export interface UnitSetup {
   home?: number;
   source?: number;
   patrol?: number[];
+  haul?: HaulRoute | null;
 }
 
 /** A new unit standing on the center of a tile. */
@@ -93,6 +97,12 @@ export function addUnit(s: MatchState, owner: number, kind: UnitKind, tile: numb
     lastAttack: -1000,
     lastHurt: -1000,
     chaseTile: -1,
+    haul: setup.haul ? { ...setup.haul } : null,
+    haulState: 0,
+    carryItem: null,
+    carry: 0,
+    haulTicks: 0,
+    lastPost: 0,
   };
   s.units.push(u);
   return u;

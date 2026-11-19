@@ -19,13 +19,13 @@ export interface Bundle {
   cost: Cost;
   structures: StructureKind[];
   units: UnitKind[];
-  /** Transport it unlocks: 'pipe' now; rails come with Stage 4b. */
+  /** Transport it unlocks: 'pipe', 'rail'. */
   transport: string[];
   /** The stage that builds its content, while that stage is still to come. */
-  stage?: '4b' | '4c';
+  stage?: '4c';
 }
 
-const b = (id: string, name: string, tier: number, cost: [ItemId, number][], unlocks: { structures?: StructureKind[]; units?: UnitKind[]; transport?: string[] } = {}, stage?: '4b' | '4c'): Bundle => ({
+const b = (id: string, name: string, tier: number, cost: [ItemId, number][], unlocks: { structures?: StructureKind[]; units?: UnitKind[]; transport?: string[] } = {}, stage?: '4c'): Bundle => ({
   id,
   name,
   tier,
@@ -44,7 +44,7 @@ export const BUNDLE_LIST: Bundle[] = [
   b('coalPower', 'Coal Power', 1, [['ironPlate', 50], ['ironRod', 50], ['cable', 40]], { structures: ['coalGenerator'] }),
   b('copperSheet', 'Copper Sheets', 1, [['ironPlate', 40], ['wire', 80]]),
   b('gunpowder', 'Black Powder', 1, [['ironPlate', 40], ['screws', 100], ['cable', 20]]),
-  b('haulers', 'Haulers', 1, [['ironPlate', 80], ['ironRod', 60], ['screws', 100]], { structures: ['garage'], units: ['hauler'] }, '4b'),
+  b('haulers', 'Haulers', 1, [['ironPlate', 80], ['ironRod', 60], ['screws', 100]], { structures: ['garage'], units: ['hauler'] }),
   b('riflemen', 'Riflemen', 1, [['ironPlate', 60], ['ironRod', 60], ['wire', 60]], { units: ['rifleman'] }, '4c'),
   b('turrets', 'Gun Turrets', 1, [['ironPlate', 80], ['screws', 150], ['cable', 30]], { structures: ['gunTurret'] }, '4c'),
   // Tier 2: paid with tier 1 parts.
@@ -54,7 +54,7 @@ export const BUNDLE_LIST: Bundle[] = [
   b('frames', 'Modular Frames', 2, [['reinforcedIronPlate', 20], ['rotor', 20]]),
   b('motors', 'Motors', 2, [['reinforcedIronPlate', 15], ['rotor', 15], ['copperSheet', 50]]),
   b('compactedCoal', 'Compacted Coal', 2, [['reinforcedIronPlate', 10], ['screws', 200], ['copperSheet', 40]]),
-  b('commandPost', 'Command Post', 2, [['reinforcedIronPlate', 20], ['rotor', 10], ['cable', 80]], { structures: ['commandPost'] }, '4b'),
+  b('commandPost', 'Command Post', 2, [['reinforcedIronPlate', 20], ['rotor', 10], ['cable', 80]], { structures: ['commandPost'] }),
   b('assault', 'Assault Infantry', 2, [['reinforcedIronPlate', 30], ['rotor', 10], ['blackPowder', 40]], { units: ['burner', 'vanguard'] }, '4c'),
   b('mechanics', 'Mechanics', 2, [['reinforcedIronPlate', 20], ['rotor', 20], ['cable', 60]], { units: ['mechanic'] }, '4c'),
   b('mortars', 'Mortars', 2, [['reinforcedIronPlate', 25], ['rotor', 10], ['blackPowder', 50]], { structures: ['mortar'] }, '4c'),
@@ -64,7 +64,7 @@ export const BUNDLE_LIST: Bundle[] = [
   b('electronics', 'Electronics', 3, [['quickwire', 100], ['stator', 20], ['copperSheet', 50]]),
   b('smokeless', 'Smokeless Powder', 3, [['steelPipe', 30], ['blackPowder', 80], ['quartzCrystal', 20]]),
   b('framework', 'Industrial Parts', 3, [['modularFrame', 15], ['stator', 20], ['steelBeam', 30]]),
-  b('rails', 'Rails', 3, [['steelBeam', 60], ['steelPipe', 60], ['motor', 10]], { transport: ['rail', 'railStation'] }, '4b'),
+  b('rails', 'Rails', 3, [['steelBeam', 60], ['steelPipe', 60], ['motor', 10]], { structures: ['railStation'], transport: ['rail'] }),
   b('armor', 'Armor', 3, [['motor', 20], ['steelPipe', 50], ['modularFrame', 10]], { units: ['tank', 'rocketTank'] }, '4c'),
   b('aviation', 'Aviation', 3, [['motor', 20], ['smartPlating', 20], ['quickwire', 100]], { structures: ['landingPad'], units: ['fighter'] }, '4c'),
   b('arcPile', 'Arc Piles', 3, [['stator', 20], ['quickwire', 80], ['steelBeam', 20]], { structures: ['arcPile'] }, '4c'),

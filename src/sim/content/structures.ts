@@ -22,6 +22,7 @@ export type StructureKind =
   | 'garage'
   | 'landingPad'
   | 'commandPost'
+  | 'railStation'
   | 'solar'
   | 'coalGenerator'
   | 'fuelGenerator'
@@ -32,7 +33,7 @@ export type StructureKind =
   | 'arcPile'
   | 'mortar';
 
-export type StructureCategory = 'hub' | 'gatherer' | 'processor' | 'production' | 'organization' | 'power' | 'storage' | 'research' | 'defense';
+export type StructureCategory = 'hub' | 'gatherer' | 'processor' | 'production' | 'organization' | 'power' | 'storage' | 'research' | 'defense' | 'transport';
 
 /** A side of a footprint: 0 +x, 1 +y, 2 -x, 3 -y (before rotating). */
 export type Side = 0 | 1 | 2 | 3;
@@ -87,9 +88,25 @@ const defs: StructureDef[] = [
   { kind: 'refinery', name: 'Refinery', category: 'processor', w: 3, h: 4, hp: 600, buildSeconds: 9, cost: [['motor', 10], ['steelPipe', 30], ['copperSheet', 20], ['steelBeam', 20]], power: 30, powerOut: 0, maxLines: 2, ports: [{ side: 3, offset: 0, io: 'in' }, { side: 3, offset: 2, io: 'in', fluid: true }, { side: 1, offset: 0, io: 'out' }, { side: 1, offset: 2, io: 'out', fluid: true }], blurb: 'Processes oil and other fluids. Fluids go in and out through pipes.' },
   { kind: 'manufacturer', name: 'Manufacturer', category: 'processor', w: 4, h: 4, hp: 800, buildSeconds: 12, cost: [['motor', 10], ['modularFrame', 20], ['plastic', 50], ['cable', 50]], power: 55, powerOut: 0, maxLines: 2, ports: [...inRow(4), { side: 1, offset: 1, io: 'out' }], blurb: 'Turns three or four materials into an advanced part.' },
   { kind: 'deployer', name: 'Deployer', category: 'production', w: 3, h: 3, hp: 800, buildSeconds: 8, cost: [['ironPlate', 20], ['ironRod', 20], ['screws', 40]], power: 10, powerOut: 0, maxLines: 2, ports: inRow(3), blurb: 'Produces infantry and the Mechanic.' },
-  { kind: 'garage', name: 'Garage', category: 'production', w: 4, h: 4, hp: 1000, buildSeconds: 10, cost: [['ironPlate', 50], ['ironRod', 30]], power: 20, powerOut: 0, maxLines: 2, ports: inRow(4), blurb: 'Produces vehicles and the Hauler.' },
+  { kind: 'garage', name: 'Garage', category: 'production', w: 4, h: 4, hp: 1000, buildSeconds: 10, cost: [['ironPlate', 50], ['ironRod', 30], ['screws', 80]], power: 20, powerOut: 0, maxLines: 2, ports: inRow(4), blurb: 'Produces vehicles and the Hauler.' },
   { kind: 'landingPad', name: 'Landing Pad', category: 'production', w: 4, h: 4, hp: 1000, buildSeconds: 10, cost: [['ironPlate', 50], ['cable', 30]], power: 30, powerOut: 0, maxLines: 2, ports: inRow(4), blurb: 'Produces aircraft.' },
-  { kind: 'commandPost', name: 'Command Post', category: 'organization', w: 2, h: 2, hp: 600, buildSeconds: 6, cost: [['ironPlate', 20], ['cable', 10]], power: 2, powerOut: 0, maxLines: 2, ports: [], blurb: 'Gives extra directives to units within its radius.' },
+  { kind: 'commandPost', name: 'Command Post', category: 'organization', w: 2, h: 2, hp: 600, buildSeconds: 6, cost: [['reinforcedIronPlate', 10], ['ironRod', 20], ['cable', 30]], power: 2, powerOut: 0, maxLines: 2, ports: [], blurb: 'Your units acting on their own that come into its radius are sent on to its waypoint.' },
+  {
+    kind: 'railStation',
+    name: 'Rail Station',
+    category: 'transport',
+    w: 4,
+    h: 3,
+    hp: 800,
+    buildSeconds: 8,
+    cost: [['steelBeam', 20], ['motor', 10], ['wire', 200]],
+    power: 50,
+    powerOut: 0,
+    maxLines: 2,
+    // The track runs through the middle; items come in on one long side and go out on the other.
+    ports: [{ side: 3, offset: 0, io: 'in' }, { side: 3, offset: 3, io: 'in', fluid: true }, { side: 1, offset: 0, io: 'out' }, { side: 1, offset: 3, io: 'out', fluid: true }],
+    blurb: 'Trains stop here to load and unload. Items and fluids come in on one side and go out on the other.',
+  },
   { kind: 'solar', name: 'Solar Generator', category: 'power', w: 2, h: 2, hp: 250, buildSeconds: 3, cost: [['ironPlate', 5], ['wire', 8]], power: 0, powerOut: 4, maxLines: 2, ports: [], blurb: 'Power without fuel. Weak for the space it takes.' },
   { kind: 'coalGenerator', name: 'Coal Generator', category: 'power', w: 3, h: 3, hp: 600, buildSeconds: 6, cost: [['reinforcedIronPlate', 20], ['rotor', 10], ['cable', 30]], power: 0, powerOut: 75, maxLines: 4, ports: [{ side: 3, offset: 1, io: 'in' }], blurb: 'Burns Coal or Compacted Coal for power, by belt or by hand.' },
   { kind: 'fuelGenerator', name: 'Fuel Generator', category: 'power', w: 3, h: 3, hp: 600, buildSeconds: 7, cost: [['motor', 15], ['steelBeam', 15], ['copperSheet', 30], ['quickwire', 50]], power: 0, powerOut: 250, maxLines: 4, ports: [{ side: 3, offset: 1, io: 'in', fluid: true }], blurb: 'Burns Fuel or Turbofuel for power, by pipe or by hand.' },

@@ -2,7 +2,7 @@ import { bagTotal, isFluid, type ItemId } from './content/items';
 import { DEPOT_CAPACITY, FUEL_BUFFER, fuelsOf, INPUT_CYCLES } from './content/economy';
 import { RECIPES, isMachineKind } from './content/recipes';
 import { DX, DY } from './content/structures';
-import { BELT_SPEED, spacingOf } from './content/transport';
+import { BELT_SPEED, STATION_CAPACITY, spacingOf } from './content/transport';
 import { FP } from './fmath';
 import { cache, type Belt, type MatchState, type Structure } from './state';
 import { isProducer, producerRoom } from './production';
@@ -26,6 +26,8 @@ export function structureAccepts(t: Structure, item: ItemId): boolean {
     return !!need && (t.inv[item] ?? 0) < need[1] * INPUT_CYCLES;
   }
   if (t.kind === 'depot') return bagTotal(t.inv) < DEPOT_CAPACITY;
+  // A Rail Station holds what comes in until a train loads it.
+  if (t.kind === 'railStation') return bagTotal(t.inv) < STATION_CAPACITY;
   if (isProducer(t)) return producerRoom(t, item) > 0;
   const fuels = fuelsOf(t.kind);
   if (fuels) return fuels.includes(item) && bagTotal(t.inv) < FUEL_BUFFER;

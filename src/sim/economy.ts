@@ -22,7 +22,8 @@ const isFuelGenerator = (t: Structure) => !!fuelsOf(t.kind);
 function wantsToWork(s: MatchState, t: Structure): boolean {
   if (isProducer(t)) return producerWants(s, t);
   if (t.kind === 'drill' || t.kind === 'pump') return bagTotal(t.out) < DRILL_BUFFER;
-  if (t.kind === 'depot') return true;
+  // Always on: a Depot, a Command Post and a Rail Station draw power the whole time.
+  if (t.kind === 'depot' || t.kind === 'commandPost' || t.kind === 'railStation') return true;
   if (isMachine(t)) {
     if (!t.recipe) return false;
     if (t.progress > 0) return true;

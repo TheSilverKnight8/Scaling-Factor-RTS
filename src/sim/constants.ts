@@ -21,3 +21,8 @@ export const HUB_SIGHT = 13;
 
 /** Tiles per side of a fog chunk. The renderer redraws a chunk when its fog changes. */
 export const FOG_CHUNK = 16;
+
+/** A Command Post's radius, in tiles, from its center (SPEC: a fixed radius). */
+export const POST_RADIUS = 8;
+/** Health of a rail tile. */
+export const RAIL_HP = 200;

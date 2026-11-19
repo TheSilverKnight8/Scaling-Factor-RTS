@@ -47,7 +47,8 @@ const tiles = (n: number) => Math.round(n * FP);
 const later = { parts: [] as Cost, seconds: 10, hubSeconds: 4 };
 
 const defs: UnitDef[] = [
-  { kind: 'hauler', name: 'Hauler', attack: 'none', air: false, speed: tps(3), sight: 6, hp: 120, damage: 0, range: 0, cooldown: 20, producedAt: 'garage', ...later },
+  // A small truck: carries resources from a node to a building (SPEC), HAUL_CAPACITY at a time.
+  { kind: 'hauler', name: 'Hauler', attack: 'none', air: false, speed: tps(3.5), sight: 6, hp: 120, damage: 0, range: 0, cooldown: 20, parts: [['ironPlate', 10], ['rotor', 2]], producedAt: 'garage', seconds: 12, hubSeconds: 6 },
   { kind: 'mechanic', name: 'Mechanic', attack: 'none', air: false, speed: tps(2.8), sight: 7, hp: 90, damage: 0, range: 0, cooldown: 20, producedAt: 'deployer', ...later },
   {
     kind: 'minuteman',

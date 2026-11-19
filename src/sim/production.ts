@@ -67,7 +67,7 @@ export function producerWork(s: MatchState, t: Structure) {
   if (t.progress === 0) {
     const home = homeSlot(s, t);
     t.made++;
-    addUnit(s, t.owner, kind, frontTile(s, t), { mode: t.mode, imperative: t.imperative, home, source: t.id, patrol: [...t.patrol] });
+    addUnit(s, t.owner, kind, frontTile(s, t), { mode: t.mode, imperative: t.imperative, home, source: t.id, patrol: [...t.patrol], haul: kind === 'hauler' ? t.haul : null });
   }
 }
 
@@ -122,7 +122,8 @@ export function setRally(s: MatchState, player: number, id: number, x: number, y
   const slots = spreadTiles(s, t.rally, 40);
   let k = 0;
   for (const u of s.units) {
-    if (u.source !== t.id || !slots.length) continue;
+    // Units a Command Post has sent on keep following the posts.
+    if (u.source !== t.id || !slots.length || u.lastPost) continue;
     u.home = slots[k++ % slots.length];
   }
 }

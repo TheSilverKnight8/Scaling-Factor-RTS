@@ -1,6 +1,7 @@
 import { UNITS } from './content/units';
 import { applyCommand, sendTo, type Command } from './commands';
 import { tickBelts } from './belts';
+import { tickTrains } from './rail';
 import { tickStructures } from './economy';
 import { removeDead, separate, tickArmies } from './army';
 import { buildHealth } from './factory';
@@ -31,6 +32,7 @@ export function step(s: MatchState, commands: readonly Command[]) {
   tickStructures(s);
   tickHubs(s);
   tickBelts(s);
+  tickTrains(s);
   tickArmies(s);
   for (const u of s.units) moveUnit(s, u);
   separate(s);

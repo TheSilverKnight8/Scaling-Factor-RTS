@@ -29,6 +29,11 @@ export function stateHash(s: MatchState): number {
     mix(u.cooldown);
     mix(u.order ? (u.order.kind === 'move' ? u.order.tile : -u.order.target) : 0);
     mix(u.patrolStep);
+    mix(u.haul ? u.haul.node * 65536 + u.haul.target : -1);
+    mix(u.haulState);
+    mix(u.carry);
+    mix(u.haulTicks);
+    mix(u.lastPost);
   }
   const bag = (b: Bag) => {
     for (const id of ITEM_IDS) mix(b[id] ?? 0);
@@ -53,6 +58,24 @@ export function stateHash(s: MatchState): number {
     mix(t.made);
     mix(t.lastPulse);
     mix(t.energy);
+    mix(t.haul ? t.haul.node * 65536 + t.haul.target : -1);
+    mix(t.waypoint);
+  }
+  for (const r of s.rails) {
+    mix(r.id);
+    mix(r.x);
+    mix(r.y);
+    mix(r.hp);
+  }
+  for (const tr of s.trains) {
+    mix(tr.id);
+    mix(tr.x);
+    mix(tr.y);
+    mix(tr.next);
+    mix(tr.pathStep);
+    mix(tr.dwell);
+    for (const st of tr.stops) mix(st.station * 4 + (st.load ? 1 : 0) + (st.unload ? 2 : 0));
+    bag(tr.cargo);
   }
   for (const b of s.belts) {
     mix(b.id);

@@ -31,6 +31,7 @@ export function canPlaceBelt(s: MatchState, player: number, kind: TransportKind,
   if (s.map.terrain[i] === Tile.Cliff) return { ok: false, reason: 'Belts cannot cross cliffs.' };
   if (s.occupied[i]) return { ok: false, reason: 'A structure is in the way.' };
   if (s.nodeAt[i]) return { ok: false, reason: 'Nodes are kept for Drills and Pumps.' };
+  if (s.railAt[i]) return { ok: false, reason: 'A rail is in the way.' };
   const existing = s.beltAt[i];
   if (existing) {
     const b = cache(s).beltById.get(existing)!;
@@ -51,7 +52,7 @@ export function newBeltCount(s: MatchState, tiles: readonly BeltTile[]) {
 /** Lays transport on all the tiles, or none of them if any cannot be placed or paid for. */
 export function placeBelts(s: MatchState, player: number, kind: TransportKind, tiles: readonly BeltTile[]) {
   const p = getPlayer(s, player);
-  if (!p || tiles.length === 0 || tiles.length > 400 || !transportUnlocked(p, kind)) return;
+  if (!p || tiles.length === 0 || tiles.length > 400 || kind === 'rail' || !TRANSPORT[kind] || !transportUnlocked(p, kind)) return;
   const seen = new Set<number>();
   for (const t of tiles) {
     if (!canPlaceBelt(s, player, kind, t.x, t.y).ok) return;

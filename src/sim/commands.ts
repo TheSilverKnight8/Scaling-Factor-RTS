@@ -9,9 +9,12 @@ import { FP } from './fmath';
 import { findPath, nearestOpen, spreadTiles } from './path';
 import { canPlace } from './placement';
 import { canConnect, linesOf } from './power';
-import { cache, getPlayer, type MatchState, type Unit, unitTile } from './state';
+import { cache, getPlayer, type MatchState, type TrainStop, type Unit, unitTile } from './state';
 import type { Imperative, UnitKind } from './content/units';
 import { placeUnit, setMode, setPatrol, setProduce, setRally } from './production';
+import { setGarageRoute, setHaulRoute } from './haul';
+import { addTrain, placeRails, removeRails, removeTrain, setStops } from './rail';
+import { setWaypoint } from './post';
 
 // Everything a player does reaches the match as a command, applied at the start of a tick.
 // In multiplayer (Stage 6) only commands travel between computers, so every action must be
@@ -35,7 +38,15 @@ export type Command =
   | { type: 'rally'; player: number; id: number; x: number; y: number }
   | { type: 'patrol'; player: number; id: number; points: number[] }
   | { type: 'placeUnit'; player: number; kind: UnitKind; x: number; y: number }
-  | { type: 'research'; player: number; id: string };
+  | { type: 'research'; player: number; id: string }
+  | { type: 'haulRoute'; player: number; units: number[]; node?: number; target?: number }
+  | { type: 'garageRoute'; player: number; id: number; node?: number; target?: number }
+  | { type: 'rails'; player: number; tiles: { x: number; y: number }[] }
+  | { type: 'removeRails'; player: number; ids: number[] }
+  | { type: 'addTrain'; player: number; station: number }
+  | { type: 'trainStops'; player: number; id: number; stops: TrainStop[] }
+  | { type: 'removeTrain'; player: number; id: number }
+  | { type: 'waypoint'; player: number; id: number; x: number; y: number };
 
 export function applyCommand(s: MatchState, c: Command) {
   switch (c.type) {
@@ -75,6 +86,22 @@ export function applyCommand(s: MatchState, c: Command) {
       return placeUnit(s, c.player, c.kind, c.x, c.y);
     case 'research':
       return research(s, c.player, c.id);
+    case 'haulRoute':
+      return setHaulRoute(s, c.player, c.units, c.node, c.target);
+    case 'garageRoute':
+      return setGarageRoute(s, c.player, c.id, c.node, c.target);
+    case 'rails':
+      return placeRails(s, c.player, c.tiles);
+    case 'removeRails':
+      return removeRails(s, c.player, c.ids);
+    case 'addTrain':
+      return addTrain(s, c.player, c.station);
+    case 'trainStops':
+      return setStops(s, c.player, c.id, c.stops);
+    case 'removeTrain':
+      return removeTrain(s, c.player, c.id);
+    case 'waypoint':
+      return setWaypoint(s, c.player, c.id, c.x, c.y);
   }
 }
 
@@ -115,6 +142,11 @@ function moveUnits(s: MatchState, player: number, ids: number[], tx: number, ty:
     taken[best] = 1;
     takeCharge(u);
     u.order = { kind: 'move', tile: slots[best] };
+    // A Hauler sent somewhere leaves its route and waits there.
+    if (u.kind === 'hauler') {
+      u.haul = null;
+      u.home = slots[best];
+    }
     sendTo(s, u, slots[best]);
   }
 }
@@ -130,7 +162,7 @@ function takeCharge(u: Unit) {
 /** Ordered units attack a target: an enemy unit, structure or belt (SPEC: units attack structures directly). */
 function attack(s: MatchState, player: number, ids: number[], target: number) {
   const c = cache(s);
-  const owner = s.units.find((u) => u.id === target)?.owner ?? c.structById.get(target)?.owner ?? c.beltById.get(target)?.owner;
+  const owner = s.units.find((u) => u.id === target)?.owner ?? c.structById.get(target)?.owner ?? c.beltById.get(target)?.owner ?? c.railById.get(target)?.owner;
   if (owner === undefined || owner === player) return;
   const wanted = new Set(ids);
   for (const u of s.units) {
@@ -182,6 +214,7 @@ function demolish(s: MatchState, player: number, id: number) {
   for (let yy = t.y; yy < t.y + t.h; yy++) for (let xx = t.x; xx < t.x + t.w; xx++) s.occupied[yy * s.size + xx] = 0;
   s.blockVersion++;
   s.powerVersion++;
+  if (t.kind === 'railStation') s.railVersion++;
 }
 
 function addLine(s: MatchState, player: number, a: number, b: number) {

@@ -2,8 +2,10 @@ import { UNITS, canHit } from './content/units';
 import { PULSE_DAMAGE, PULSE_REACH, PULSE_TICKS } from './constants';
 import { FP, isqrt } from './fmath';
 import { findPath, lineClear } from './path';
-import { cache, getPlayer, tileCenter, unitTile, walkable, type Belt, type MatchState, type Structure, type Unit } from './state';
+import { cache, getPlayer, tileCenter, unitTile, walkable, type Belt, type MatchState, type Rail, type Structure, type Unit } from './state';
 import { linesOf } from './power';
+import { haulThink, nodeLoaders } from './haul';
+import { tickPosts } from './post';
 
 // Units at work (SPEC "Unit behavior", "Combat"): following orders and imperatives, finding
 // and hitting targets, structures and belts taking damage, the Hub's pulse, deaths and
@@ -20,7 +22,7 @@ const REPATH_TICKS = 10;
 const LEASH = 4;
 const GRID = 8; // tiles per cell of the lookup grid
 
-type Target = { kind: 'unit'; u: Unit } | { kind: 'structure'; t: Structure } | { kind: 'belt'; b: Belt };
+type Target = { kind: 'unit'; u: Unit } | { kind: 'structure'; t: Structure } | { kind: 'belt'; b: Belt | Rail };
 
 interface Lookup {
   cols: number;
@@ -66,7 +68,7 @@ function resolve(s: MatchState, look: Lookup, id: number): Target | null {
   const c = cache(s);
   const t = c.structById.get(id);
   if (t && t.hp > 0) return { kind: 'structure', t };
-  const b = c.beltById.get(id);
+  const b = c.beltById.get(id) ?? c.railById.get(id);
   if (b && b.hp > 0) return { kind: 'belt', b };
   return null;
 }
@@ -154,7 +156,7 @@ function walkTo(s: MatchState, u: Unit, goal: number) {
 const idle = (u: Unit) => u.pathStep >= u.path.length;
 
 /** One tick of thinking for a unit: what to fight, where to go, and hitting if it can. */
-function think(s: MatchState, look: Lookup, u: Unit) {
+function think(s: MatchState, look: Lookup, u: Unit, loaders: Map<number, number>) {
   const def = UNITS[u.kind];
   if (u.cooldown > 0) u.cooldown--;
   const here = unitTile(s, u);
@@ -163,6 +165,12 @@ function think(s: MatchState, look: Lookup, u: Unit) {
   if (u.order?.kind === 'move') {
     if (!idle(u)) return; // a move order walks past enemies
     u.order = null;
+  }
+  // Haulers follow their route (they cannot fight).
+  if (u.kind === 'hauler') {
+    u.order = null;
+    u.target = 0;
+    return haulThink(s, u, loaders);
   }
   let chase = false;
   let radius = def.range;
@@ -309,7 +317,9 @@ function acquireAny(look: Lookup, u: Unit, radius: number): boolean {
 /** Every unit thinks (and hits) in id order; then the Hubs pulse. */
 export function tickArmies(s: MatchState) {
   const look = buildLookup(s);
-  for (const u of s.units) if (u.hp > 0) think(s, look, u);
+  tickPosts(s);
+  const loaders = nodeLoaders(s);
+  for (const u of s.units) if (u.hp > 0) think(s, look, u, loaders);
   pulse(s, look);
 }
 
@@ -342,6 +352,12 @@ export function removeDead(s: MatchState) {
     for (const u of s.units) if (u.hp <= 0) s.events.push({ kind: 'death', x: u.x, y: u.y, owner: u.owner });
     s.units = s.units.filter((u) => u.hp > 0);
   }
+  const deadRails = s.rails.filter((r) => r.hp <= 0);
+  if (deadRails.length) {
+    for (const r of deadRails) s.railAt[r.y * s.size + r.x] = 0;
+    s.rails = s.rails.filter((r) => r.hp > 0);
+    s.railVersion++;
+  }
   const deadBelts = s.belts.filter((b) => b.hp <= 0);
   if (deadBelts.length) {
     for (const b of deadBelts) s.beltAt[b.y * s.size + b.x] = 0;
@@ -364,6 +380,7 @@ function destroyStructure(s: MatchState, t: Structure) {
   for (let yy = t.y; yy < t.y + t.h; yy++) for (let xx = t.x; xx < t.x + t.w; xx++) if (s.occupied[yy * s.size + xx] === t.id) s.occupied[yy * s.size + xx] = 0;
   s.blockVersion++;
   s.powerVersion++;
+  if (t.kind === 'railStation') s.railVersion++;
 }
 
 /** A player whose Hub is destroyed is out, and everything they had is destroyed (SPEC). */
@@ -378,6 +395,10 @@ export function eliminate(s: MatchState, player: number) {
   for (const b of s.belts) if (b.owner === player) s.beltAt[b.y * s.size + b.x] = 0;
   s.belts = s.belts.filter((b) => b.owner !== player);
   s.lines = s.lines.filter((l) => l.owner !== player);
+  for (const r of s.rails) if (r.owner === player) s.railAt[r.y * s.size + r.x] = 0;
+  s.rails = s.rails.filter((r) => r.owner !== player);
+  s.trains = s.trains.filter((t) => t.owner !== player);
+  s.railVersion++;
   s.transportVersion++;
   s.blockVersion++;
   s.powerVersion++;

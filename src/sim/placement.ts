@@ -28,6 +28,7 @@ export function canPlace(s: MatchState, player: number, kind: StructureKind, x: 
       if (t === Tile.Cliff) return { ok: false, reason: 'Cannot build on cliffs.' };
       if (s.occupied[i]) return { ok: false, reason: 'Something is already built here.' };
       if (s.beltAt[i]) return { ok: false, reason: 'A belt is in the way.' };
+      if (s.railAt[i]) return { ok: false, reason: 'A rail is in the way.' };
       const n = s.nodeAt[i];
       if (n) {
         if (!def.onNode) return { ok: false, reason: 'Nodes are kept for Drills and Pumps.' };
