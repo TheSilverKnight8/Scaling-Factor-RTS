@@ -6,6 +6,7 @@ import { bagAdd } from './content/items';
 import { nearestOpen, spreadTiles } from './path';
 import { cache, getPlayer, unitCountOf, walkable, type MatchState, type Structure } from './state';
 import { canAfford, pay, returnBag } from './economy';
+import { unitUnlocked } from './research';
 
 // Making units (SPEC "Unit production and automation", "Hand-placed units"). A Deployer makes
 // one unit type at a time from its key parts, delivered by belt or by hand, for as long as it
@@ -88,7 +89,7 @@ export function setProduce(s: MatchState, player: number, id: number, kind: Unit
   const p = getPlayer(s, player);
   const t = cache(s).structById.get(id);
   if (!p || !t || t.owner !== player || !isProducer(t)) return;
-  if (kind !== null && (!UNITS[kind].atStart || UNITS[kind].producedAt !== t.kind)) return;
+  if (kind !== null && (!unitUnlocked(p, kind) || UNITS[kind].producedAt !== t.kind)) return;
   if (kind === t.produce) return;
   for (const [item, n] of partsInProgress(t)) bagAdd(p.hub, item, n);
   returnBag(p, t.inv);
@@ -147,7 +148,7 @@ export function setPatrol(s: MatchState, player: number, id: number, points: num
  */
 export function placeUnit(s: MatchState, player: number, kind: UnitKind, x: number, y: number) {
   const p = getPlayer(s, player);
-  if (!p || p.eliminated || !UNITS[kind]?.atStart) return;
+  if (!p || p.eliminated || !UNITS[kind] || !unitUnlocked(p, kind)) return;
   if (x < 0 || y < 0 || x >= s.size || y >= s.size) return;
   if (p.queue.length >= HUB_QUEUE) return;
   if (!canAfford(p, UNITS[kind].parts)) return;

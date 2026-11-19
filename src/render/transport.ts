@@ -68,6 +68,41 @@ export function drawBelt(ctx: Ctx, x: number, y: number, dir: number, from: numb
   }
 }
 
+const PIPE = '#6f7780';
+const PIPE_LIGHT = '#98a0a8';
+const PIPE_HALF = 0.2;
+const PIPE_Z = 5;
+
+/**
+ * One pipe tile (Caleb: pipes work like belts, one way): a raised tube with a flange at the
+ * end it flows out of. `from` as for belts. A stripe along the top shows the fluid inside, in
+ * its color, as long as the pipe is full (`fill` from 0 to 1).
+ */
+export function drawPipe(ctx: Ctx, x: number, y: number, dir: number, from: number | null, fluid: ItemId | null = null, fill = 0) {
+  const cx = x + 0.5;
+  const cy = y + 0.5;
+  const ax = DX[dir];
+  const ay = DY[dir];
+  ctx.lineJoin = 'round';
+  // A short stand under the middle.
+  poly(ctx, [P(cx - 0.08, cy - 0.08, 0), P(cx + 0.08, cy - 0.08, 0), P(cx + 0.08, cy - 0.08, PIPE_Z), P(cx - 0.08, cy - 0.08, PIPE_Z)], '#3a3732', true);
+  if (from === null) {
+    strip(ctx, cx - ax * 0.5, cy - ay * 0.5, cx + ax * 0.5, cy + ay * 0.5, PIPE_HALF, PIPE_Z, PIPE, true);
+  } else {
+    const mx = DX[from];
+    const my = DY[from];
+    strip(ctx, cx - mx * 0.5, cy - my * 0.5, cx + mx * PIPE_HALF, cy + my * PIPE_HALF, PIPE_HALF, PIPE_Z, PIPE, true);
+    strip(ctx, cx - ax * PIPE_HALF, cy - ay * PIPE_HALF, cx + ax * 0.5, cy + ay * 0.5, PIPE_HALF, PIPE_Z, PIPE, true);
+  }
+  if (fluid && fill > 0) {
+    // The fluid stripe, filling from the outflow end back.
+    const len = 0.86 * Math.min(1, fill);
+    strip(ctx, cx + ax * (0.43 - len), cy + ay * (0.43 - len), cx + ax * 0.43, cy + ay * 0.43, 0.1, PIPE_Z + 1, ITEM_LOOK[fluid].color, false);
+  } else strip(ctx, cx - ax * 0.1, cy - ay * 0.1, cx + ax * 0.38, cy + ay * 0.38, 0.05, PIPE_Z + 1, PIPE_LIGHT, false);
+  // A flange where it flows out.
+  strip(ctx, cx + ax * 0.38, cy + ay * 0.38, cx + ax * 0.48, cy + ay * 0.48, PIPE_HALF + 0.06, PIPE_Z, '#4d545c', true);
+}
+
 /** Where an item `pos` along a tile sits (tile coordinates), for straight belts and elbows. */
 export function beltItemSpot(x: number, y: number, dir: number, from: number | null, pos: number): [number, number] {
   const f = pos / FP;
@@ -79,7 +114,7 @@ export function beltItemSpot(x: number, y: number, dir: number, from: number | n
   return [cx - DX[from] * (0.5 - f), cy - DY[from] * (0.5 - f)];
 }
 
-type ItemShape = 'ore' | 'crystal' | 'ingot' | 'plate' | 'rod' | 'screws' | 'coil' | 'drop';
+type ItemShape = 'ore' | 'crystal' | 'ingot' | 'plate' | 'rod' | 'screws' | 'coil' | 'drop' | 'powder' | 'box' | 'cylinder' | 'board' | 'frame';
 
 const ITEM_LOOK: Record<ItemId, { shape: ItemShape; color: string; light: string }> = {
   ironOre: { shape: 'ore', color: C.RESOURCE_COLORS.iron[0], light: C.RESOURCE_COLORS.iron[1] },
@@ -96,6 +131,39 @@ const ITEM_LOOK: Record<ItemId, { shape: ItemShape; color: string; light: string
   screws: { shape: 'screws', color: '#9a9ea4', light: '#d0d3d7' },
   wire: { shape: 'coil', color: '#c4743a', light: '#e59d63' },
   cable: { shape: 'coil', color: '#2d2c30', light: '#c4743a' },
+  goldIngot: { shape: 'ingot', color: '#c9992c', light: '#ecc865' },
+  steelIngot: { shape: 'ingot', color: '#5d636b', light: '#8d939b' },
+  copperSheet: { shape: 'plate', color: '#b8682f', light: '#dd955c' },
+  quickwire: { shape: 'coil', color: '#c9992c', light: '#ecc865' },
+  reinforcedIronPlate: { shape: 'plate', color: '#6d737b', light: '#a3a8ae' },
+  rotor: { shape: 'cylinder', color: '#7f848b', light: '#c4743a' },
+  modularFrame: { shape: 'frame', color: '#7f848b', light: '#b9bdc2' },
+  smartPlating: { shape: 'plate', color: '#4f6a86', light: '#d0d3d7' },
+  steelBeam: { shape: 'rod', color: '#4f555c', light: '#7d838a' },
+  steelPipe: { shape: 'rod', color: '#6a7078', light: '#9ba0a6' },
+  versatileFramework: { shape: 'frame', color: '#4f555c', light: '#d2a42c' },
+  stator: { shape: 'cylinder', color: '#5d636b', light: '#c4743a' },
+  motor: { shape: 'cylinder', color: '#4f555c', light: '#a2252a' },
+  automatedWiring: { shape: 'board', color: '#3f5a3a', light: '#c4743a' },
+  quartzCrystal: { shape: 'crystal', color: '#d9b4ce', light: '#f8ecf3' },
+  silica: { shape: 'powder', color: '#ece6dc', light: '#ffffff' },
+  crystalOscillator: { shape: 'box', color: '#4f555c', light: '#e1c5d8' },
+  plastic: { shape: 'box', color: '#3c74a8', light: '#7ea9d0' },
+  rubber: { shape: 'box', color: '#26252a', light: '#4f4e55' },
+  polymerResin: { shape: 'powder', color: '#7a6f9e', light: '#a99fcb' },
+  petroleumCoke: { shape: 'powder', color: '#3a3836', light: '#5f5c58' },
+  heavyOilResidue: { shape: 'drop', color: '#5b2f6e', light: '#8d5aa3' },
+  fuel: { shape: 'drop', color: '#d98a1c', light: '#f2b85a' },
+  circuitBoard: { shape: 'board', color: '#2f6b3a', light: '#d2a42c' },
+  computer: { shape: 'box', color: '#3a4250', light: '#7fb3d6' },
+  aiLimiter: { shape: 'board', color: '#3a4250', light: '#ecc865' },
+  highSpeedConnector: { shape: 'board', color: '#5d636b', light: '#ecc865' },
+  supercomputer: { shape: 'box', color: '#262c36', light: '#d2a42c' },
+  modularEngine: { shape: 'cylinder', color: '#3a4250', light: '#d2a42c' },
+  blackPowder: { shape: 'powder', color: '#2a2a2d', light: '#55555a' },
+  smokelessPowder: { shape: 'powder', color: '#b0322f', light: '#d9625d' },
+  compactedCoal: { shape: 'box', color: '#26262a', light: '#4f4f56' },
+  turbofuel: { shape: 'drop', color: '#b5262b', light: '#e0585c' },
 };
 
 export function itemColor(item: ItemId) {
@@ -166,6 +234,38 @@ export function drawItemIcon(ctx: Ctx, item: ItemId) {
       return;
     case 'drop':
       path([[0, -5], [3.5, 1], [0, 4], [-3.5, 1]], color);
+      ctx.fillStyle = light;
+      ctx.fillRect(-1.2, -1, 1.4, 2);
+      return;
+    case 'powder':
+      path([[-5.5, 3], [-3, -1.5], [0, -3.5], [3, -1.5], [5.5, 3]], color);
+      ctx.fillStyle = light;
+      ctx.fillRect(-1.5, -2, 2, 1.4);
+      return;
+    case 'box':
+      path([[0, -5], [5, -2.5], [0, 0], [-5, -2.5]], light);
+      path([[-5, -2.5], [0, 0], [0, 4.5], [-5, 2]], color);
+      path([[5, -2.5], [0, 0], [0, 4.5], [5, 2]], color);
+      return;
+    case 'cylinder':
+      path([[-4.5, -2.5], [4.5, -2.5], [4.5, 3], [-4.5, 3]], color);
+      ctx.fillStyle = light;
+      ctx.beginPath();
+      ctx.ellipse(0, -2.5, 4.5, 1.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      return;
+    case 'board':
+      path([[0, -3.5], [6, 0], [0, 3.5], [-6, 0]], color);
+      ctx.fillStyle = light;
+      ctx.fillRect(-2.5, -1, 1.5, 1.5);
+      ctx.fillRect(1, -1, 1.5, 1.5);
+      return;
+    case 'frame':
+      path([[0, -4], [6, -1], [0, 2], [-6, -1]], color);
+      path([[0, -2.2], [2.6, -1], [0, 0.2], [-2.6, -1]], light);
+      path([[-6, -1], [0, 2], [0, 4], [-6, 1]], color);
+      path([[6, -1], [0, 2], [0, 4], [6, 1]], color);
       return;
   }
 }

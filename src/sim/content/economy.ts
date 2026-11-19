@@ -1,4 +1,4 @@
-import type { Bag } from './items';
+import type { Bag, ItemId } from './items';
 
 // The economy's numbers (builder's, tuned in playtesting).
 
@@ -18,6 +18,20 @@ export const INPUT_CYCLES = 10;
  * Mk.1 rates of 30, 60 and 120 a minute.
  */
 export const DRILL_TICKS = [40, 20, 10] as const;
+
+/** Ticks per unit (m³) of Crude Oil a Pump gathers, by purity: Satisfactory's Oil Extractor, 60, 120 and 240 a minute. */
+export const PUMP_TICKS = [20, 10, 5] as const;
+
+/** What each generator burns (SPEC: fuel is Coal, Compacted Coal, Fuel and Turbofuel). Satisfactory's
+ *  Coal Generator also needs water; the spec has no water, so here it runs on its fuel alone. */
+export const GENERATOR_FUELS: Partial<Record<string, ItemId[]>> = {
+  coalGenerator: ['coal', 'compactedCoal'],
+  fuelGenerator: ['fuel', 'turbofuel'],
+};
+/** The fuels a structure burns, if it is a fuel generator (own keys only: 'constructor' is not one). */
+export const fuelsOf = (kind: string): ItemId[] | undefined => (Object.hasOwn(GENERATOR_FUELS, kind) ? GENERATOR_FUELS[kind] : undefined);
+/** Fuel a generator holds. */
+export const FUEL_BUFFER = 50;
 
 /**
  * What every player starts with in the Hub (SPEC: enough for a Drill and some Solar

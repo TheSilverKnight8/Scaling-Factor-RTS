@@ -52,6 +52,7 @@ export function stateHash(s: MatchState): number {
     mix(t.rally);
     mix(t.made);
     mix(t.lastPulse);
+    mix(t.energy);
   }
   for (const b of s.belts) {
     mix(b.id);
@@ -72,6 +73,11 @@ export function stateHash(s: MatchState): number {
     bag(p.hub);
     mix(p.queue.length);
     mix(p.eliminated ? 1 : 0);
+    mix(p.researched.length);
+    for (const c of p.tree) {
+      mix(c.col);
+      mix(c.row);
+    }
     let explored = 0;
     for (let i = 0; i < p.explored.length; i++) explored += p.explored[i];
     mix(explored);

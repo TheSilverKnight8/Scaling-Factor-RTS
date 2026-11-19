@@ -3,6 +3,7 @@ import type { UnitKind } from './content/units';
 import { HUB_SIGHT } from './constants';
 import { addStructure, addUnit, type UnitSetup } from './factory';
 import { reveal } from './fog';
+import { makeTree } from './research';
 import { getMap } from './map/maps';
 import { NODE_SIZE } from './map/types';
 import { spreadTiles } from './path';
@@ -71,6 +72,8 @@ export function createMatch(setup: MatchSetup): MatchState {
       queue: [],
       eliminated: false,
       cpu: info.cpu ?? null,
+      researched: ['basics'],
+      tree: makeTree(s),
     };
     s.players.push(p);
 

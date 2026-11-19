@@ -47,12 +47,14 @@ export interface GridInfo {
   blown: boolean;
 }
 
-/** Supply (MW) of each grid: finished generators on it. */
+/** Supply (MW) of each grid: finished generators on it that have fuel (or need none). */
 export function gridSupply(s: MatchState): Map<number, number> {
   const supply = new Map<number, number>();
   for (const t of s.structures) {
     const out = STRUCTURES[t.kind].powerOut;
-    if (out > 0 && t.buildLeft === 0) supply.set(t.grid, (supply.get(t.grid) ?? 0) + out);
+    // A fuel generator supplies only while it has energy from fuel; a Solar Generator always.
+    const fueled = t.kind !== 'coalGenerator' && t.kind !== 'fuelGenerator' ? true : t.energy > 0;
+    if (out > 0 && t.buildLeft === 0 && fueled) supply.set(t.grid, (supply.get(t.grid) ?? 0) + out);
   }
   return supply;
 }

@@ -2,8 +2,8 @@ import { STRUCTURES, footprint, type Cost, type StructureKind } from '../sim/con
 import { IMPERATIVES, UNITS, UNIT_LIST, type Imperative, type UnitKind } from '../sim/content/units';
 import { PURITY_NAMES, RESOURCES } from '../sim/content/resources';
 import { ITEMS, ITEM_IDS, bagTotal, type ItemId } from '../sim/content/items';
-import { RECIPES, RECIPE_LIST } from '../sim/content/recipes';
-import { HUB_CAPACITY } from '../sim/content/economy';
+import { RECIPES, RECIPE_LIST, isMachineKind } from '../sim/content/recipes';
+import { HUB_CAPACITY, fuelsOf } from '../sim/content/economy';
 import { POWER_LINE, TRANSPORT, type TransportKind } from '../sim/content/transport';
 import { canPlaceBelt, newBeltCount, type BeltTile } from '../sim/belts';
 import type { Command } from '../sim/commands';
@@ -15,6 +15,8 @@ import { canPlace, snapToNode } from '../sim/placement';
 import { canConnect, linesOf } from '../sim/power';
 import { cache, unitCountOf, type MatchState, type Player, type StructureStatus } from '../sim/state';
 import { isProducer, rallyOf } from '../sim/production';
+import { hasWorkingLab, isReady, recipeUnlocked, researchable, structureUnlocked, transportUnlocked, unitUnlocked } from '../sim/research';
+import { BUNDLES } from '../sim/content/research';
 import { step } from '../sim/step';
 import { BUTTON_ZOOM, MAX_ZOOM, MIN_ZOOM, isoX, isoY, toTile } from '../render/iso';
 import { POLE_TOP, STRUCTURE_HEIGHT, structureHull, type Pt } from '../render/objects';
@@ -28,46 +30,96 @@ import { Camera } from './camera';
 
 export type ToolId = StructureKind | TransportKind | 'line' | 'placeUnit' | 'patrol';
 
+export type BuildGroup = 'Production' | 'Base' | 'Power' | 'Transport';
+export const BUILD_GROUPS: BuildGroup[] = ['Production', 'Base', 'Power', 'Transport'];
+
 export interface BuildEntry {
   id: ToolId;
   name: string;
-  key: string;
-  /** The key's code (KeyboardEvent.code). */
-  code: string;
-  group: 'Production' | 'Power' | 'Transport';
+  /** A fixed letter key; entries without one take the digits of their tab, in order. */
+  letter?: string;
+  group: BuildGroup;
   cost: Cost;
   /** Shown after the cost, for things paid per tile. */
   costNote?: string;
   blurb: string;
 }
 
-const structureEntry = (kind: StructureKind, key: string, group: BuildEntry['group']): BuildEntry => ({
+const structureEntry = (kind: StructureKind, group: BuildGroup, letter?: string): BuildEntry => ({
   id: kind,
   name: STRUCTURES[kind].name,
-  key,
-  code: /^\d$/.test(key) ? `Digit${key}` : `Key${key}`,
+  letter,
   group,
   cost: STRUCTURES[kind].cost,
   blurb: STRUCTURES[kind].blurb,
 });
+const transportEntry = (kind: TransportKind, letter: string): BuildEntry => ({
+  id: kind,
+  name: TRANSPORT[kind].name,
+  letter,
+  group: 'Transport',
+  cost: TRANSPORT[kind].cost,
+  costNote: kind === 'belt' || kind === 'pipe' ? 'per tile' : undefined,
+  blurb: TRANSPORT[kind].blurb,
+});
 
-/** The build menu, in groups. Each has a key. */
+/**
+ * Everything that can be built, in tabs. Only what the player has researched is shown; the
+ * rest (including what later stages build) stays hidden until it is unlocked.
+ */
 export const BUILD_MENU: BuildEntry[] = [
-  structureEntry('drill', '1', 'Production'),
-  structureEntry('smelter', '2', 'Production'),
-  structureEntry('constructor', '3', 'Production'),
-  structureEntry('deployer', '4', 'Production'),
-  structureEntry('depot', '5', 'Production'),
-  structureEntry('laboratory', '6', 'Production'),
-  structureEntry('solar', '7', 'Power'),
-  structureEntry('powerPole', 'P', 'Power'),
-  { id: 'line', name: POWER_LINE.name, key: 'L', code: 'KeyL', group: 'Power', cost: POWER_LINE.cost, costNote: 'each', blurb: POWER_LINE.blurb },
-  { id: 'belt', name: TRANSPORT.belt.name, key: 'B', code: 'KeyB', group: 'Transport', cost: TRANSPORT.belt.cost, costNote: 'per tile', blurb: TRANSPORT.belt.blurb },
-  { id: 'splitter', name: TRANSPORT.splitter.name, key: 'T', code: 'KeyT', group: 'Transport', cost: TRANSPORT.splitter.cost, blurb: TRANSPORT.splitter.blurb },
-  { id: 'merger', name: TRANSPORT.merger.name, key: 'M', code: 'KeyM', group: 'Transport', cost: TRANSPORT.merger.cost, blurb: TRANSPORT.merger.blurb },
+  structureEntry('drill', 'Production'),
+  structureEntry('pump', 'Production'),
+  structureEntry('smelter', 'Production'),
+  structureEntry('constructor', 'Production'),
+  structureEntry('assembler', 'Production'),
+  structureEntry('foundry', 'Production'),
+  structureEntry('refinery', 'Production'),
+  structureEntry('manufacturer', 'Production'),
+  structureEntry('deployer', 'Base'),
+  structureEntry('garage', 'Base'),
+  structureEntry('landingPad', 'Base'),
+  structureEntry('commandPost', 'Base'),
+  structureEntry('depot', 'Base'),
+  structureEntry('laboratory', 'Base'),
+  structureEntry('gunTurret', 'Base'),
+  structureEntry('arcPile', 'Base'),
+  structureEntry('mortar', 'Base'),
+  structureEntry('solar', 'Power'),
+  structureEntry('coalGenerator', 'Power'),
+  structureEntry('fuelGenerator', 'Power'),
+  structureEntry('powerPole', 'Power', 'P'),
+  { id: 'line', name: POWER_LINE.name, letter: 'L', group: 'Power', cost: POWER_LINE.cost, costNote: 'each', blurb: POWER_LINE.blurb },
+  transportEntry('belt', 'B'),
+  transportEntry('pipe', 'I'),
+  transportEntry('splitter', 'T'),
+  transportEntry('merger', 'M'),
 ];
 
-const isTransport = (id: ToolId): id is TransportKind => id === 'belt' || id === 'splitter' || id === 'merger';
+/** A build menu entry as shown: unlocked, with its key now. */
+export interface MenuItem {
+  id: ToolId;
+  name: string;
+  key: string;
+  code: string;
+  affordable: boolean;
+}
+
+export interface ResearchCell {
+  id: string;
+  name: string;
+  tier: number;
+  col: number;
+  row: number;
+  state: 'done' | 'open' | 'locked' | 'later';
+  /** The stage that builds it, for bundles not built yet. */
+  stage?: string;
+  cost: { item: ItemId; name: string; need: number; have: number }[];
+  affordable: boolean;
+  unlocks: string[];
+}
+
+const isTransport = (id: ToolId): id is TransportKind => id === 'belt' || id === 'pipe' || id === 'splitter' || id === 'merger';
 const isStructureTool = (id: ToolId): id is StructureKind => !isTransport(id) && id !== 'line' && id !== 'placeUnit' && id !== 'patrol';
 
 export interface Tool {
@@ -107,6 +159,7 @@ export type SelectionInfo =
       maxHp: number;
       mine: boolean;
       isHub: boolean;
+      isLab: boolean;
       canDemolish: boolean;
       building: { percent: number; secondsLeft: number } | null;
       status: StructureStatus;
@@ -148,7 +201,14 @@ export interface HudState {
   /** Why the thing under the cursor cannot be placed. */
   placeError: string | null;
   /** Which build menu entries the Hub can pay for now. */
-  affordable: Partial<Record<ToolId, boolean>>;
+  /** The build menu tab shown, and what it holds now. */
+  group: BuildGroup;
+  menu: MenuItem[];
+  /** Tabs with something unlocked in them. */
+  groups: BuildGroup[];
+  /** Every build menu entry unlocked now, with its key (for the description panel). */
+  keys: Partial<Record<ToolId, string>>;
+  research: { cells: ResearchCell[]; cols: number; rows: number; hasLab: boolean; done: number; total: number } | null;
   units: number;
   unitLimit: number;
   /** Short messages: a player out of the match. */
@@ -237,7 +297,9 @@ export class Game {
   paused = false;
   menuOpen = false;
   /** The build menu tab shown. */
-  group: BuildEntry['group'] = 'Production';
+  group: BuildGroup = 'Production';
+  /** Whether the research panel is open. */
+  researchOpen = false;
 
   private hud: HudState;
   private hudKey = '';
@@ -279,8 +341,8 @@ export class Game {
 
   private makeHud(): HudState {
     const p = this.player;
-    const affordable: Partial<Record<ToolId, boolean>> = {};
-    for (const e of BUILD_MENU) affordable[e.id] = e.cost.every(([id, n]) => (p.hub[id] ?? 0) >= n);
+    const keys: Partial<Record<ToolId, string>> = {};
+    for (const g of BUILD_GROUPS) for (const m of this.menuItems(g)) keys[m.id] = m.key;
     return {
       seconds: Math.floor((this.state.tick * TICK_MS) / 1000),
       paused: this.paused,
@@ -296,11 +358,88 @@ export class Game {
       selection: this.selectionInfo(),
       tool: this.tool ? { id: this.tool.id, rot: this.tool.rot, lineFrom: this.tool.lineFrom !== null } : null,
       placeError: this.preview()?.error ?? null,
-      affordable,
+      group: this.group,
+      menu: this.menuItems(this.group),
+      groups: BUILD_GROUPS.filter((g) => this.menuItems(g).length > 0),
+      keys,
+      research: this.researchOpen ? this.researchInfo() : null,
       units: unitCountOf(this.state, this.me),
       unitLimit: UNIT_LIMIT,
       notices: this.notices.filter((n) => performance.now() - n.at < 6000).map((n) => n.text),
     };
+  }
+
+  /** Whether the player has unlocked a build menu entry. */
+  private unlocked(id: ToolId): boolean {
+    const p = this.player;
+    if (id === 'line') return true;
+    if (isTransport(id)) return transportUnlocked(p, id);
+    if (isStructureTool(id)) return structureUnlocked(p, id);
+    return false;
+  }
+
+  /** A tab's unlocked entries with their keys: letters stay fixed; the rest take 1, 2, 3... in order. */
+  menuItems(group: BuildGroup): MenuItem[] {
+    const p = this.player;
+    let digit = 0;
+    const out: MenuItem[] = [];
+    for (const e of BUILD_MENU) {
+      if (e.group !== group || !this.unlocked(e.id)) continue;
+      let key = e.letter ?? '';
+      if (!key) {
+        digit++;
+        if (digit > 10) key = '';
+        else key = String(digit % 10);
+      }
+      out.push({ id: e.id, name: e.name, key, code: key === '' ? '' : /^\d$/.test(key) ? `Digit${key}` : `Key${key}`, affordable: e.cost.every(([id, n]) => (p.hub[id] ?? 0) >= n) });
+    }
+    return out;
+  }
+
+  private researchInfo(): NonNullable<HudState['research']> {
+    const p = this.player;
+    const open = researchable(p);
+    const cells: ResearchCell[] = p.tree.map((c) => {
+      const bd = BUNDLES[c.id];
+      const done = p.researched.includes(c.id);
+      const state: ResearchCell['state'] = done ? 'done' : !isReady(bd) ? 'later' : open.has(c.id) ? 'open' : 'locked';
+      const unlocks = [
+        ...bd.structures.map((k) => STRUCTURES[k].name),
+        ...bd.units.map((k) => UNITS[k].name),
+        ...bd.transport.map((k) => (k in TRANSPORT ? TRANSPORT[k as TransportKind].name : k === 'rail' ? 'Rail' : k)),
+        ...RECIPE_LIST.filter((r) => r.unlock === c.id).flatMap((r) => r.outputs.map(([id]) => ITEMS[id].name)),
+      ];
+      return {
+        id: c.id,
+        name: bd.name,
+        tier: bd.tier,
+        col: c.col,
+        row: c.row,
+        state,
+        stage: bd.stage,
+        cost: bd.cost.map(([item, need]) => ({ item, name: ITEMS[item].name, need, have: p.hub[item] ?? 0 })),
+        affordable: bd.cost.every(([item, n]) => (p.hub[item] ?? 0) >= n),
+        unlocks: [...new Set(unlocks)],
+      };
+    });
+    return {
+      cells,
+      cols: Math.max(...cells.map((c) => c.col)) + 1,
+      rows: Math.max(...cells.map((c) => c.row)) + 1,
+      hasLab: hasWorkingLab(this.state, this.me),
+      done: p.researched.length,
+      total: cells.filter((c) => c.state !== 'later').length,
+    };
+  }
+
+  setResearchOpen(open: boolean) {
+    this.researchOpen = open;
+    this.refreshHud();
+  }
+
+  /** Researches a bundle (checked again when the command arrives). */
+  research(id: string) {
+    this.issue({ type: 'research', player: this.me, id });
   }
 
   private selectionInfo(): SelectionInfo | null {
@@ -340,9 +479,10 @@ export class Game {
       const def = STRUCTURES[t.kind];
       const mine = t.owner === this.me;
       const building = t.buildLeft > 0 ? { percent: Math.floor((100 * (t.buildTotal - t.buildLeft)) / t.buildTotal), secondsLeft: Math.ceil((t.buildLeft * TICK_MS) / 1000) } : null;
-      const isMachine = t.kind === 'smelter' || t.kind === 'constructor';
+      const isMachine = isMachineKind(t.kind);
+      const p = this.player;
       const recipes = isMachine
-        ? RECIPE_LIST.filter((r) => r.machine === t.kind && r.atStart).map((r) => ({
+        ? RECIPE_LIST.filter((r) => r.machine === t.kind && recipeUnlocked(p, r)).map((r) => ({
             id: r.id,
             name: r.name,
             text: `${r.inputs.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + ')} → ${r.outputs.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + ')} in ${r.seconds} s`,
@@ -354,8 +494,8 @@ export class Game {
         const n = (t.inv[id] ?? 0) + (t.out[id] ?? 0);
         if (n > 0) contents.push({ item: id, name: ITEMS[id].name, count: n });
       }
-      const p = this.player;
-      const needs = isMachine && t.recipe ? RECIPES[t.recipe].inputs.map(([id]) => ({ item: id, name: ITEMS[id].name, have: t.inv[id] ?? 0, inHub: p.hub[id] ?? 0, room: giveRoom(t, id) })) : [];
+      const needOf = (id: ItemId) => ({ item: id, name: ITEMS[id].name, have: t.inv[id] ?? 0, inHub: p.hub[id] ?? 0, room: giveRoom(t, id) });
+      const needs = isMachine && t.recipe ? RECIPES[t.recipe].inputs.map(([id]) => needOf(id)) : (fuelsOf(t.kind)?.map(needOf) ?? []);
       let power: Extract<SelectionInfo, { kind: 'structure' }>['power'] = null;
       if (def.maxLines > 0) {
         let supply = 0;
@@ -363,7 +503,7 @@ export class Game {
         for (const o of s.structures) {
           if (o.grid !== t.grid) continue;
           const od = STRUCTURES[o.kind];
-          if (od.powerOut > 0 && o.buildLeft === 0) supply += od.powerOut;
+          if (od.powerOut > 0 && o.buildLeft === 0 && (!fuelsOf(o.kind) || o.energy > 0)) supply += od.powerOut;
           if (o.status === 'working') demand += od.power;
         }
         power = { uses: def.power, makes: def.powerOut, supply, demand, blown: t.blown, lines: linesOf(s, t.id).length, maxLines: def.maxLines };
@@ -371,7 +511,7 @@ export class Game {
       const production = isProducer(t)
         ? {
             produce: t.produce,
-            options: UNIT_LIST.filter((d) => d.atStart && d.producedAt === t.kind).map((d) => ({ kind: d.kind, name: d.name, parts: d.parts.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + '), seconds: d.seconds })),
+            options: UNIT_LIST.filter((d) => unitUnlocked(p, d.kind) && d.producedAt === t.kind).map((d) => ({ kind: d.kind, name: d.name, parts: d.parts.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + '), seconds: d.seconds })),
             percent: t.produce && t.progress > 0 ? Math.floor((100 * (UNITS[t.produce].seconds * 20 - t.progress)) / (UNITS[t.produce].seconds * 20)) : 0,
             mode: t.mode,
             imperative: t.imperative,
@@ -382,7 +522,7 @@ export class Game {
       const place =
         t.kind === 'hub' && mine
           ? {
-              options: UNIT_LIST.filter((d) => d.atStart).map((d) => ({ kind: d.kind, name: d.name, parts: d.parts.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + '), seconds: d.hubSeconds, affordable: d.parts.every(([id, n]) => (p.hub[id] ?? 0) >= n) })),
+              options: UNIT_LIST.filter((d) => unitUnlocked(p, d.kind)).map((d) => ({ kind: d.kind, name: d.name, parts: d.parts.map(([id, n]) => `${n} ${ITEMS[id].name}`).join(' + '), seconds: d.hubSeconds, affordable: d.parts.every(([id, n]) => (p.hub[id] ?? 0) >= n) })),
               waiting: queue.length,
               percent: queue.length && t.progress > 0 ? Math.floor((100 * (UNITS[queue[0].kind].hubSeconds * 20 - t.progress)) / (UNITS[queue[0].kind].hubSeconds * 20)) : 0,
             }
@@ -392,6 +532,9 @@ export class Game {
       if (isProducer(t) && t.status === 'noRecipe') statusText = 'Choose a unit to produce.';
       if (isProducer(t) && t.status === 'noInput') statusText = 'Waiting for parts (by belt, or Add from the Hub).';
       if (isProducer(t) && t.status === 'working') statusText = `Making a ${UNITS[t.produce!].name}.`;
+      const fuels = fuelsOf(t.kind);
+      if (fuels && t.status === 'noInput') statusText = `No fuel: give it ${fuels.map((f) => ITEMS[f].name).join(' or ')}, by ${t.kind === 'fuelGenerator' ? 'pipe' : 'belt'} or by hand.`;
+      if (fuels && t.status === 'working') statusText = 'Burning fuel as fast as its grid draws power.';
       return {
         production,
         place,
@@ -405,6 +548,7 @@ export class Game {
         maxHp: def.hp,
         mine,
         isHub: t.kind === 'hub',
+        isLab: t.kind === 'laboratory',
         canDemolish: mine && t.kind !== 'hub',
         building,
         status: t.status,
@@ -656,7 +800,7 @@ export class Game {
     this.refreshHud();
   }
 
-  setGroup(group: BuildEntry['group']) {
+  setGroup(group: BuildGroup) {
     this.group = group;
     this.refreshHud();
   }
@@ -664,6 +808,7 @@ export class Game {
   // ------------------------------------------------------------- tools
 
   startTool(id: ToolId) {
+    if (!this.unlocked(id) && id !== 'placeUnit' && id !== 'patrol') return;
     const keep = this.tool?.id === id ? this.tool.rot : 0;
     this.tool = { id, rot: keep, dragFrom: null, flip: false, lineFrom: null };
     const entry = BUILD_MENU.find((e) => e.id === id);
@@ -1044,6 +1189,7 @@ export class Game {
     if (e.code === 'Escape') {
       e.preventDefault();
       if (this.menuOpen) this.setMenu(false);
+      else if (this.researchOpen) this.setResearchOpen(false);
       else if (this.tool) this.cancelTool();
       else if (this.selection) {
         this.selection = null;
@@ -1066,7 +1212,16 @@ export class Game {
       e.preventDefault();
       return this.demolishSelected();
     }
-    const entry = BUILD_MENU.find((b) => b.code === e.code);
+    if (e.code === 'KeyU') return this.setResearchOpen(!this.researchOpen);
+    if (e.code === 'KeyQ' || e.code === 'KeyE') {
+      // Previous or next tab that has something in it.
+      const tabs = BUILD_GROUPS.filter((g) => this.menuItems(g).length > 0);
+      const at = Math.max(0, tabs.indexOf(this.group));
+      return this.setGroup(tabs[(at + (e.code === 'KeyE' ? 1 : tabs.length - 1)) % tabs.length]);
+    }
+    // Letters work from any tab; digits pick from the tab shown.
+    const letter = BUILD_GROUPS.flatMap((g) => this.menuItems(g)).find((m) => m.code === e.code && !m.code.startsWith('Digit'));
+    const entry = letter ?? this.menuItems(this.group).find((m) => m.code === e.code);
     if (entry) {
       if (this.tool?.id === entry.id) this.cancelTool();
       else this.startTool(entry.id);

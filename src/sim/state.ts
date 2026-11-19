@@ -29,6 +29,17 @@ export interface Player {
   eliminated: boolean;
   /** A CPU player. 'idle' (until Stage 5): it only defends itself. */
   cpu: 'idle' | null;
+  /** Research bundles done, in order ('basics' from the start). */
+  researched: string[];
+  /** This player's research grid (Caleb: laid out at random, tier by tier). */
+  tree: TreeCell[];
+}
+
+/** A research bundle's place on a player's grid: its tier's column and a row. */
+export interface TreeCell {
+  id: string;
+  col: number;
+  row: number;
 }
 
 export type UnitOrder = { kind: 'move'; tile: number } | { kind: 'attack'; target: number };
@@ -128,6 +139,8 @@ export interface Structure {
   lastPulse: number;
   /** Tick it was last hit (for drawing). */
   lastHurt: number;
+  /** Coal and Fuel Generators: energy left from the fuel burning now, in MW·ticks. */
+  energy: number;
 }
 
 export interface BeltItem {

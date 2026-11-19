@@ -1,8 +1,8 @@
-import { bagTotal, type ItemId } from './content/items';
-import { DEPOT_CAPACITY, INPUT_CYCLES } from './content/economy';
-import { RECIPES } from './content/recipes';
+import { bagTotal, isFluid, type ItemId } from './content/items';
+import { DEPOT_CAPACITY, FUEL_BUFFER, fuelsOf, INPUT_CYCLES } from './content/economy';
+import { RECIPES, isMachineKind } from './content/recipes';
 import { DX, DY } from './content/structures';
-import { BELT_SPACING, BELT_SPEED } from './content/transport';
+import { BELT_SPEED, spacingOf } from './content/transport';
 import { FP } from './fmath';
 import { cache, type Belt, type MatchState, type Structure } from './state';
 import { isProducer, producerRoom } from './production';
@@ -20,25 +20,27 @@ export function powered(t: Structure) {
 /** Whether a structure takes this item into an input port now. */
 export function structureAccepts(t: Structure, item: ItemId): boolean {
   if (!powered(t)) return false;
-  if (t.kind === 'smelter' || t.kind === 'constructor') {
+  if (isMachineKind(t.kind)) {
     const r = t.recipe ? RECIPES[t.recipe] : undefined;
     const need = r?.inputs.find(([id]) => id === item);
     return !!need && (t.inv[item] ?? 0) < need[1] * INPUT_CYCLES;
   }
   if (t.kind === 'depot') return bagTotal(t.inv) < DEPOT_CAPACITY;
   if (isProducer(t)) return producerRoom(t, item) > 0;
+  const fuels = fuelsOf(t.kind);
+  if (fuels) return fuels.includes(item) && bagTotal(t.inv) < FUEL_BUFFER;
   return false;
 }
 
 export function beltEntryFree(b: Belt) {
-  return b.items.length === 0 || b.items[b.items.length - 1].pos >= BELT_SPACING;
+  return b.items.length === 0 || b.items[b.items.length - 1].pos >= spacingOf(b.kind);
 }
 
 /** Whether an item moving in direction `moveDir` may enter this belt tile now. */
 function beltAccepts(s: MatchState, b: Belt, moveDir: number): boolean {
   if (!beltEntryFree(b)) return false;
   const back = (b.dir + 2) % 4;
-  if (b.kind === 'belt') return moveDir !== back; // not head-on
+  if (b.kind === 'belt' || b.kind === 'pipe') return moveDir !== back; // not head-on
   if (b.kind === 'splitter') return moveDir === b.dir; // from behind only
   // Merger: from behind, left or right, taking turns when more than one side is waiting.
   if (moveDir === back) return false;
@@ -77,7 +79,8 @@ export function deliver(s: MatchState, owner: number, fx: number, fy: number, di
   const bid = s.beltAt[i];
   if (bid) {
     const b = c.beltById.get(bid)!;
-    if (b.owner !== owner || !beltAccepts(s, b, dir)) return false;
+    // Pipes carry fluids; belts, splitters and mergers carry solids.
+    if (b.owner !== owner || (b.kind === 'pipe') !== isFluid(item) || !beltAccepts(s, b, dir)) return false;
     b.items.push({ item, pos: 0 });
     if (b.kind === 'merger') b.rr = dir;
     return true;
@@ -88,7 +91,7 @@ export function deliver(s: MatchState, owner: number, fx: number, fy: number, di
   if (t.owner !== owner) return false;
   const back = (dir + 2) % 4;
   const port = c.ports.get(t.id)!.find((p) => p.io === 'in' && p.x === x && p.y === y && p.dir === back);
-  if (!port || !structureAccepts(t, item)) return false;
+  if (!port || port.fluid !== isFluid(item) || !structureAccepts(t, item)) return false;
   t.inv[item] = (t.inv[item] ?? 0) + 1;
   return true;
 }

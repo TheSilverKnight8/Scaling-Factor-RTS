@@ -97,6 +97,47 @@ function groundEllipse(ctx: Ctx, cx: number, cy: number, r: number, fill: string
 
 // ---------------------------------------------------------------- nodes
 
+/** A standing cylinder of radius r tiles centered on (cx, cy), from z0 to z1. */
+function tank(ctx: Ctx, cx: number, cy: number, r: number, z0: number, z1: number, fill: string) {
+  const rx = r * HW * Math.SQRT2;
+  const ry = r * HH * Math.SQRT2;
+  const [X, Y0] = P(cx, cy, z0);
+  const Y1 = P(cx, cy, z1)[1];
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = C.NAVY;
+  ctx.lineWidth = OUTLINE;
+  ctx.beginPath();
+  ctx.moveTo(X - rx, Y1);
+  ctx.lineTo(X - rx, Y0);
+  ctx.ellipse(X, Y0, rx, ry, 0, Math.PI, 0, true);
+  ctx.lineTo(X + rx, Y1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = C.METAL_TOP;
+  ctx.beginPath();
+  ctx.ellipse(X, Y1, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+}
+
+/** A colored band around a cylinder at height z. */
+function tankRing(ctx: Ctx, cx: number, cy: number, r: number, z: number, color: string) {
+  const rx = r * HW * Math.SQRT2;
+  const ry = r * HH * Math.SQRT2;
+  const [X, Y] = P(cx, cy, z);
+  ctx.strokeStyle = C.NAVY;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.ellipse(X, Y, rx, ry, 0, 0, Math.PI);
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.ellipse(X, Y, rx - 0.5, ry, 0, 0, Math.PI);
+  ctx.stroke();
+}
+
 function rock(ctx: Ctx, X: number, Y: number, r: number, [main, light, dark]: [string, string, string], fleck?: string) {
   const pts: Pt[] = [
     [X - r, Y],
@@ -402,6 +443,111 @@ export function drawStructure(ctx: Ctx, s: StructureLook, time: number) {
       }
       return;
     }
+    case 'assembler': {
+      box(ctx, x + i, y + i, x1 - i, y1 - i, 0, 24);
+      band(ctx, x + i, y + i, x1 - i, y1 - i, 20, 24, s.color, s.dark);
+      // An open bay on top with two arms meeting over it.
+      poly(ctx, [P(x + 0.6, y + 0.6, 24), P(x1 - 0.6, y + 0.6, 24), P(x1 - 0.6, y1 - 0.6, 24), P(x + 0.6, y1 - 0.6, 24)], C.METAL_DARK);
+      const sw = s.active ? Math.sin(time / 450) * 0.3 : 0;
+      for (const side of [0, 1]) {
+        const bx = side ? x1 - 0.45 : x + 0.45;
+        const base = P(bx, y + h / 2, 24);
+        const elbow: Pt = [base[0], base[1] - 18];
+        const hand = P(x + w / 2 + (side ? 0.25 : -0.25), y + h / 2 + (side ? sw : -sw), 30);
+        line(ctx, base, elbow, C.NAVY, 5);
+        line(ctx, elbow, hand, C.NAVY, 5);
+        line(ctx, base, elbow, s.color, 2.6);
+        line(ctx, elbow, hand, s.color, 2.6);
+      }
+      return;
+    }
+    case 'foundry': {
+      box(ctx, x + i, y + i, x1 - i, y1 - i, 0, 26, C.METAL_DARK, C.METAL_DARK, C.shade(C.METAL_DARK, 0.8));
+      band(ctx, x + i, y + i, x1 - i, y1 - i, 22, 26, s.color, s.dark);
+      // A crucible on top, glowing while it works, and a tall stack.
+      const glow = s.active ? 0.75 + 0.25 * Math.sin(time / 300) : 0.15;
+      tank(ctx, x + w / 2 - 0.3, y + h / 2 + 0.3, 0.75, 26, 36, C.METAL_LEFT);
+      const [X, Y] = P(x + w / 2 - 0.3, y + h / 2 + 0.3, 36);
+      ctx.globalAlpha *= glow;
+      ctx.fillStyle = C.GLOW;
+      ctx.beginPath();
+      ctx.ellipse(X, Y, 0.55 * HW * Math.SQRT2, 0.55 * HH * Math.SQRT2 * zScale, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha /= glow;
+      box(ctx, x1 - 0.85, y + 0.35, x1 - 0.35, y + 0.85, 26, 64, C.METAL_DARK, C.METAL_DARK, C.shade(C.METAL_DARK, 0.75));
+      band(ctx, x1 - 0.85, y + 0.35, x1 - 0.35, y + 0.85, 56, 60, s.color, s.dark);
+      return;
+    }
+    case 'refinery': {
+      box(ctx, x + i, y + i, x1 - i, y1 - i, 0, 12, C.CONCRETE_TOP, C.CONCRETE_LEFT, C.CONCRETE_RIGHT);
+      band(ctx, x + i, y + i, x1 - i, y1 - i, 9, 12, s.color, s.dark);
+      // Two columns joined by a pipe, the taller one flaring while it works.
+      tank(ctx, x + 0.85, y + 0.95, 0.5, 12, 70, C.METAL_LEFT);
+      for (const z of [30, 50]) tankRing(ctx, x + 0.85, y + 0.95, 0.5, z, s.color);
+      line(ctx, P(x + 0.85, y + 0.95, 40), P(x1 - 0.95, y1 - 1.05, 40), C.NAVY, 5);
+      line(ctx, P(x + 0.85, y + 0.95, 40), P(x1 - 0.95, y1 - 1.05, 40), C.METAL_RIGHT, 3);
+      tank(ctx, x1 - 0.95, y1 - 1.05, 0.6, 12, 46, C.METAL_LEFT);
+      tankRing(ctx, x1 - 0.95, y1 - 1.05, 0.6, 38, s.color);
+      if (s.active) {
+        const [fx, fy] = P(x + 0.85, y + 0.95, 70);
+        const f = 0.8 + 0.2 * Math.sin(time / 120);
+        ctx.fillStyle = C.GLOW;
+        ctx.strokeStyle = C.NAVY;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(fx - 3, fy);
+        ctx.quadraticCurveTo(fx - 3, fy - 9 * f, fx, fy - 13 * f);
+        ctx.quadraticCurveTo(fx + 3, fy - 9 * f, fx + 3, fy);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      return;
+    }
+    case 'manufacturer': {
+      box(ctx, x + i, y + i, x1 - i, y1 - i, 0, 34);
+      band(ctx, x + i, y + i, x1 - i, y1 - i, 30, 34, s.color, s.dark);
+      // A raised roof section with vents, and a wide loading door.
+      box(ctx, x + 0.7, y + 0.7, x1 - 1.6, y1 - 0.7, 34, 44);
+      for (let k = 0; k < 3; k++) {
+        const vy = y + 1 + k * 0.7;
+        line(ctx, P(x1 - 1.6, vy, 37), P(x1 - 1.6, vy + 0.4, 37), C.NAVY, 2);
+      }
+      onLeft(ctx, y1 - i, x + 0.7, x1 - 0.7, 0, 22, C.METAL_DARK);
+      const light = s.active ? C.GLOW : C.METAL_RIGHT;
+      onLeft(ctx, y1 - i, x + 0.9, x + 1.2, 25, 29, light);
+      onLeft(ctx, y1 - i, x1 - 1.2, x1 - 0.9, 25, 29, light);
+      return;
+    }
+    case 'coalGenerator':
+    case 'fuelGenerator': {
+      const coal = s.kind === 'coalGenerator';
+      box(ctx, x + i, y + i, x1 - i, y1 - i, 0, 20, coal ? C.METAL_DARK : C.METAL_TOP, coal ? C.METAL_DARK : C.METAL_LEFT, coal ? C.shade(C.METAL_DARK, 0.8) : C.METAL_RIGHT);
+      band(ctx, x + i, y + i, x1 - i, y1 - i, 16, 20, s.color, s.dark);
+      // A turbine housing and a stack (coal) or two round tanks (fuel).
+      box(ctx, x + 0.4, y + 0.9, x1 - 1.3, y1 - 0.4, 20, 30);
+      if (coal) {
+        box(ctx, x1 - 0.95, y + 0.35, x1 - 0.4, y + 0.9, 20, 66, C.CONCRETE_TOP, C.CONCRETE_LEFT, C.CONCRETE_RIGHT);
+        band(ctx, x1 - 0.95, y + 0.35, x1 - 0.4, y + 0.9, 58, 62, s.color, s.dark);
+      } else {
+        tank(ctx, x1 - 0.75, y + 0.75, 0.42, 20, 44, C.METAL_LEFT);
+        tankRing(ctx, x1 - 0.75, y + 0.75, 0.42, 34, s.color);
+        tank(ctx, x1 - 0.75, y + 1.75, 0.42, 20, 40, C.METAL_LEFT);
+        tankRing(ctx, x1 - 0.75, y + 1.75, 0.42, 30, s.color);
+      }
+      // Smoke while it burns.
+      if (s.active) {
+        const [sx, sy] = coal ? P(x1 - 0.67, y + 0.62, 66) : P(x + 1.2, y + 1.6, 30);
+        for (let k = 0; k < 3; k++) {
+          const ph = (time / 1400 + k / 3) % 1;
+          ctx.fillStyle = `rgba(70, 68, 66, ${0.5 * (1 - ph)})`;
+          ctx.beginPath();
+          ctx.arc(sx + ph * 8, sy - ph * 26, 3 + ph * 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      return;
+    }
     default: {
       // Structures from later stages, drawn plainly until they get their own look.
       box(ctx, x + i, y + i, x1 - i, y1 - i, 0, 20);
@@ -509,7 +655,7 @@ export function structureHull(x: number, y: number, w: number, h: number, height
   return [P(x, y, height), P(x + w, y, height), P(x + w, y, 0), P(x + w, y + h, 0), P(x, y + h, 0), P(x, y + h, height)];
 }
 
-export const STRUCTURE_HEIGHT: Partial<Record<StructureKind, number>> = { hub: 100, drill: 56, smelter: 50, deployer: 36, laboratory: 50, constructor: 30, depot: 25, solar: 22, powerPole: 46 };
+export const STRUCTURE_HEIGHT: Partial<Record<StructureKind, number>> = { hub: 100, drill: 56, pump: 44, smelter: 50, deployer: 36, laboratory: 50, constructor: 30, depot: 25, solar: 22, powerPole: 46, assembler: 36, foundry: 64, refinery: 84, manufacturer: 44, coalGenerator: 66, fuelGenerator: 44 };
 
 /** Height of a Power Pole's cross arm, where lines attach. */
 export const POLE_TOP = 44;

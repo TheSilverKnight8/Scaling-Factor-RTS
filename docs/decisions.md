@@ -10,7 +10,7 @@ Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortc
 2. **The starting economy:** the Hub inventory and its capacity; build costs and full-refund demolition; moving items into the Hub by hand; Drill, Smelter, Constructor and Depot; Belt, Splitter and Merger; Solar Generator, power poles and lines, grids blowing and manual restart; the starting iron and copper recipes. (A Drill's target building is wherever its belts lead, Caleb.) **(done)**
 3. **Units and combat:** Deployer production (one unit type at a time, pausing at the unit limit); hand-placed units from the Hub; units acting on their own or waiting for orders, and the four imperatives; the melee, ranged and air targeting rules; attacking structures; health; the Hub's pulse. **(done)**
 4. **Research and the full content**, in three steps:
-   - 4a. The Laboratory and the semi-random tree (different per player, always completable); all materials and the remaining processors; Pump and Pipe; Coal and Fuel Generators, fueled by hand or automatically.
+   - 4a. The Laboratory and the semi-random tree (different per player, always completable); all materials and the remaining processors; Pump and Pipe; Coal and Fuel Generators, fueled by hand or automatically. **(done)**
    - 4b. The Garage and Haulers; Rail and Rail Station; the Command Post.
    - 4c. The full unit roster, Mechanic repair, and the three defenses.
 5. **The CPU and match flow:** the Easy, Normal and Hard CPU; single-player matches and pause; the other two maps; elimination and surrender; time limit, sudden death, stalemate and tiebreaker; the match summary screen.
@@ -41,8 +41,11 @@ Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortc
 | Hand-placed units once they arrive (Stage 3) | Hold the point (the Hold Point imperative there). |
 | Something to fight before the CPU (Stage 3) | An idle CPU: its Hub and 3 Minutemen at another start location, which only defend themselves, until Stage 5. |
 | Health of a structure being built (Stage 3) | Starts at a tenth and grows as it is built, like StarCraft. |
+| How the research tree is laid out (Stage 4a) | A random grid: each player's bundles sit on a grid, tiers left to right, in a random order. |
+| How much one research item unlocks (Stage 4a) | Small bundles: a few related things each, like Satisfactory's milestones. |
+| How pipes work (Stage 4a) | Like belts: one way, laid tile by tile. |
 
-Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 are under "Stage 2: for Caleb to check".
+Nothing is waiting on Caleb. Points for Caleb to look at when he tries each stage are under "Stage N: for Caleb to check".
 
 ## Builder's additions in Stage 1 (not named in the spec; easy to remove)
 
@@ -81,6 +84,21 @@ Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 a
 - **The Hub is hard to take with Minutemen.** 9 Minutemen hitting a Hub took about a third of its health in a minute while its pulse killed 4 of them (SPEC: the Hub is quite resilient).
 - **Changing a Deployer's settings changes its units too**: new mode, imperative, rally point or patrol points apply to the units it already made, except those the player has given orders.
 
+## Builder's additions in Stage 4a (not named in the spec; easy to remove)
+
+- **A Research button and panel** (top left, or U), and **Open research** in a Laboratory's panel. The panel shows your grid, what each bundle costs and unlocks, and a Research button.
+- **A fourth build menu tab, Base** (Deployer, Depot, Laboratory; later the Garage, Landing Pad, Command Post and defenses), so no tab holds more than ten structures. **Q and E** switch tabs. Digits pick from the tab shown (1, 2, 3... in order); P, L, B, I (Pipe), T and M work from any tab. Only what you have researched is shown.
+- **Fuel by hand in a generator's panel** (Add, as for machines), with its fuel and status shown.
+- **Pipes show the color of the fluid inside**, filled as far as the pipe is full.
+- **Laying a pipe over your own pipe turns it**, as with belts.
+
+## Stage 4a: for Caleb to check
+
+- **Bundles from later stages.** Haulers, Riflemen, Gun Turrets, Command Post, Assault Infantry, Mechanics, Mortars, Rails, Armor, Aviation, Arc Piles and Heavy Units are on the grid now, marked "Comes in Stage 4b/4c". They cannot be researched yet, but the way passes through them, so nothing built so far is cut off.
+- **Materials with no use yet:** Silica, Polymer Resin, Petroleum Coke, Crystal Oscillator and Supercomputer are made by their recipes but nothing takes them (Modular Engine gets its use with the Cyclops and Gunship in 4c). In Satisfactory, Silica and Polymer Resin are only used with materials the spec leaves out (Water, the aluminum line), and Petroleum Coke also burns in Coal Generators (180 MJ). The Mortar (4c) takes any material as ammo (SPEC), so they will have that use. Burning Petroleum Coke in Coal Generators would follow Satisfactory; it is left out until you say.
+- **Coal Generators need no water.** Satisfactory's also use water; the spec has no water, so they burn their fuel alone.
+- **Research costs** are the builder's: a tier-1 bundle costs 120–270 starting parts in all; a tier-4 bundle 100–170 tier-3 parts. Tunable.
+
 ## Platform
 
 | Item | Choice | Why |
@@ -118,7 +136,7 @@ Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 a
 
 | Item | Choice |
 | --- | --- |
-| Build menu (Stage 2) | Three tabs. Production: Drill 1, Smelter 2, Constructor 3, Deployer 4, Depot 5, Laboratory 6. Power: Solar Generator 7, Power Pole P, Power Line L. Transport: Belt B, Splitter T, Merger M. Hovering shows the cost and what it does; entries the Hub cannot pay for are dimmed. The rest unlock through research in Stage 4. |
+| Build menu (Stage 4a) | Four tabs, showing only what has been researched. Production: Drill, Pump, Smelter, Constructor, Assembler, Foundry, Refinery, Manufacturer. Base: Deployer, Depot, Laboratory (later the Garage, Landing Pad, Command Post and defenses). Power: Solar, Coal and Fuel Generators, Power Pole P, Power Line L. Transport: Belt B, Pipe I, Splitter T, Merger M. Digits pick from the tab shown, in order; Q and E switch tabs. Hovering shows the cost and what it does; entries the Hub cannot pay for are dimmed. |
 | Footprints (tiles) | Hub 5×5. Power Pole 1×1. Drill and Pump 2×2 (a node is 2×2). Smelter 2×2, Constructor 2×3, Foundry and Assembler 3×3, Refinery 3×4, Manufacturer 4×4. Deployer 3×3, Garage and Landing Pad 4×4. Command Post 2×2. Solar Generator 2×2, Coal and Fuel Generators 3×3. Depot 2×2. Laboratory 3×3. Gun Turret, Arc Pile and Mortar 2×2. Tunable. |
 | Placement | Every tile of the footprint must be explored ground with nothing built on it. Nodes are kept for Drills and Pumps: a Drill must line up exactly with a solid node (it snaps to the node under the cursor), a Pump with an oil node, and nothing else may cover a node. Your own units standing on the spot step aside; another player's units block it. |
 | Placing | Pick from the build menu (or its key), then click. The preview stays after placing, so several can be placed in a row, as in factory games; right click or Esc stops. R turns the structure a quarter turn (four ways), which moves its ports. |
@@ -132,7 +150,7 @@ Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 a
 | --- | --- |
 | Start | 3 Minutemen on the open tiles in front of the Hub. |
 | Minuteman | 3 tiles a second, sees 8 tiles, 60 health. The Hub sees 13 tiles at the start. Other units' numbers are placeholders until they are built. |
-| Paths | A* over the tile grid in 8 directions, never cutting a blocked corner, then shortened to the turning points. If the target cannot be reached, units go to the reachable tile nearest it. If a structure is built across a path, the unit finds a new one. |
+| Paths | A* over the tile grid in 8 directions, never cutting a blocked corner, then shortened to the turning points. If the target cannot be reached, units go to the reachable tile nearest it. If a structure is built across a path, the unit finds a new one. (Stage 4a) The open areas units can walk between are worked out again whenever something that blocks units is built or removed, so a target walled off by belts, pipes or structures is swapped at once for the nearest reachable tile instead of being searched for across the whole map. |
 | Group orders | Units spread over the open tiles nearest the clicked point, one unit per tile, each taking the nearest free spot. |
 | Crowding (Stage 3) | Ground units closer than about half a tile push each other apart a little each tick, never onto blocked ground. Group orders still send each unit to its own tile. |
 
@@ -144,7 +162,7 @@ Nothing is waiting on Caleb. Points for Caleb to look at when he tries Stage 2 a
 | Zoom (after Stage 1) | Smooth, from 40% to 200%. The mouse wheel and a trackpad pinch zoom toward the pointer; the on-screen buttons and the + and - keys step by 25% about the screen's center. 40% shows roughly a third of the map's width on a 1440-pixel-wide screen; the minimap shows the rest. A two-finger swipe on a trackpad also zooms, because the browser reports it the same way as a mouse wheel. |
 | Minimap (after Stage 1) | Bottom left, in the same isometric orientation as the main view, so up on the minimap is up on screen. It shows explored ground, water, cliffs and nodes (unexplored is dark), structures and units in their owner's color, and a white box for what the main view shows. Click or drag on it to move the camera there. |
 | Mouse | Left click selects a unit, structure, belt or node (other players' too, to look at); left drag selects your units in a box; Shift adds to the selection. Right click: with units selected, attack the enemy under the pointer or move there (StarCraft's buttons); with a Deployer selected, set its rally point. While building or placing units: left click places, right click stops. |
-| Keys | W A S D or the arrow keys move the camera; + and - zoom (so do the mouse wheel and a trackpad pinch); H centers on your Hub; 1–7, P, L, B, T and M pick from the build menu; R rotates what is being placed (and, while dragging a belt, which way it bends); Delete demolishes the selected structure or belt; Enter finishes patrol points; Esc stops building, then clears the selection, then opens the menu. |
+| Keys | W A S D or the arrow keys move the camera; + and - zoom (so do the mouse wheel and a trackpad pinch); H centers on your Hub; digits pick from the build menu tab shown, Q and E switch tabs, and P, L, B, I, T and M pick from any tab; U opens research; R rotates what is being placed (and, while dragging a belt, which way it bends); Delete demolishes the selected structure or belt; Enter finishes patrol points; Esc stops building, then clears the selection, then opens the menu. |
 | Menu | Esc or the Menu button. Single-player pauses while it is open (SPEC). Resume, Quit match, and the controls list. |
 | Fog | Unexplored tiles are drawn in a very dark navy. Explored tiles at the edge of the fog get a dark wash. Units reveal fog within their sight as they move; fog never comes back, and explored places show everything (Caleb). |
 
@@ -178,6 +196,34 @@ Recipes, extraction rates and power use follow Satisfactory, checked against the
 | Starting inventory | 30 Iron Plate, 12 Iron Rod, 38 Wire, 6 Cable: a Drill, 4 Solar Generators, 2 Power Poles and 6 Power Lines (SPEC: enough for a Drill and some Solar Generators). |
 | Costs | Drill 10 Iron Plate + 10 Iron Rod. Smelter 40 Iron Ore. Constructor 30 Iron Ingot. Depot 10 Iron Plate + 10 Iron Rod (Satisfactory's Storage Container). Solar Generator 5 Iron Plate + 8 Wire. Power Pole 1 Iron Rod + 3 Wire (Satisfactory's, without its Concrete). Power Line 1 Cable (Satisfactory's). Belt 1 Iron Plate a tile. Splitter 2 Iron Plate + 2 Cable; Merger 2 Iron Plate + 2 Iron Rod (Satisfactory's). Deployer 20 Iron Plate + 20 Iron Rod + 40 Screws. Laboratory 40 Iron Plate + 20 Cable + 100 Screws (too much for the start, SPEC). Structures that come later have placeholder costs until their stage. |
 
+## Research (Stage 4a)
+
+| Item | Choice |
+| --- | --- |
+| Where and how | At a finished Laboratory with power, one bundle at a time, instantly, paid from the Hub (SPEC). Each bundle unlocks a few related things (Caleb: small bundles). A bundle can be researched once one next to it on the grid (left, right, above or below) is researched. |
+| The grid (Caleb: a random grid) | The start bundle sits alone in the first column; each tier fills the next column, in a random order, at a random height that overlaps the column before. Each player gets their own layout from the match's seed (SPEC: different for each player). |
+| Nothing locked out (SPEC) | A bundle's cost uses only items whose recipe, machine and ingredients come from lower tiers, and every column touches the one before. `npm run check:sim` checks every cost, that every spec material can be made, that every structure can be paid for by its tier, and 300 random grids for bundles that cannot be reached. |
+| Start (SPEC) | Drill, Smelter, Constructor, Deployer, Depot, Solar Generator, Laboratory, Power Pole, Power Line, Belt, Splitter, Merger; the iron and copper recipes; the Minuteman. |
+| Tier 1 | Part Assembly (Assembler; Reinforced Iron Plate, Rotor). Coal Power (Coal Generator). Copper Sheets. Black Powder. Haulers (4b). Riflemen (4c). Gun Turrets (4c). |
+| Tier 2 | Steel (Foundry; Steel Ingot, Steel Beam, Steel Pipe). Gold (Gold Ingot, Quickwire). Quartz (Quartz Crystal, Silica). Modular Frames (Modular Frame, Smart Plating). Motors (Stator, Motor). Compacted Coal. Command Post (4b). Assault Infantry (4c). Mechanics (4c). Mortars (4c). |
+| Tier 3 | Oil Processing (Pump, Refinery, Pipe; Plastic, Rubber, Fuel, Residual Fuel, Petroleum Coke). Fuel Power (Fuel Generator). Electronics (Circuit Board, AI Limiter). Smokeless Powder. Industrial Parts (Versatile Framework, Automated Wiring). Rails (4b). Armor (4c). Aviation (4c). Arc Piles (4c). |
+| Tier 4 | Manufacturing (Manufacturer; Computer, Crystal Oscillator, High-Speed Connector, Modular Engine). Supercomputers. Turbofuel. Heavy Units (4c). |
+
+## Materials and machines (Stage 4a)
+
+Checked against Satisfactory's game data (the SatisfactoryTools data file, November 2026), as in Stage 2.
+
+| Item | Choice |
+| --- | --- |
+| Materials | Every material in the spec's list. Crude Oil, Heavy Oil Residue, Fuel and Turbofuel are fluids: they travel only in pipes and fluid ports. |
+| Recipes | Satisfactory's standard recipes for every spec material, in the machine Satisfactory uses. Compacted Coal (5 Coal + 5 Sulfur → 5 in 12 s, Assembler) and Turbofuel (6 Fuel + 4 Compacted Coal → 5 in 16 s, Refinery) exist only as alternate recipes in Satisfactory, so those are used. Refinery recipes that need Water are left out (SPEC: no water). |
+| Machines and power | Assembler 15 MW (two inputs). Foundry 16 MW (two inputs). Refinery 30 MW (a solid and a fluid input; a solid and a fluid output). Manufacturer 55 MW (four inputs). Pump 40 MW. Satisfactory's numbers. |
+| Pump | On an oil node: 60, 120 or 240 Crude Oil a minute by purity (Satisfactory's Oil Extractor), out of one fluid port. |
+| Pipes | One way, one tile each, laid like belts (Caleb); 300 a minute (Satisfactory's Mk.1 pipeline). 1 Copper Sheet a tile. They carry only fluids and connect only to fluid ports; belts never take fluids. Fluid ports that touch pass at a pipe's rate. Pipes can cross water, not cliffs, and block ground units like belts. |
+| Generators | Coal Generator 75 MW, burns Coal (300 MJ) or Compacted Coal (630 MJ). Fuel Generator 250 MW, burns Fuel (750 MJ) or Turbofuel (2,000 MJ). Satisfactory's numbers. Fuel comes by belt or pipe into the input port, or by hand (SPEC); each holds up to 50. |
+| Burning | A generator burns fuel in proportion to what its grid draws (a grid using a fifth of its supply burns a fifth as fast), as in Satisfactory. A generator with no fuel left makes nothing, and its panel says so. |
+| Costs | Satisfactory's, checked in its data, where every part is in the game and comes from a lower research tier: Assembler 8 Reinforced Iron Plate + 4 Rotor + 10 Cable; Manufacturer 10 Motor + 20 Modular Frame + 50 Plastic + 50 Cable; Coal Generator 20 Reinforced Iron Plate + 10 Rotor + 30 Cable; Pipe 1 Copper Sheet a tile. Changed: Encased Industrial Beam (needs Concrete, left out by the spec) becomes Steel Beam, so Pump 15 Motor + 20 Steel Beam + 60 Cable and Refinery 10 Motor + 20 Steel Beam + 30 Steel Pipe + 20 Copper Sheet. Fuel Generator 15 Motor + 15 Steel Beam + 30 Copper Sheet + 50 Quickwire (Satisfactory's 50 Rubber dropped: Rubber comes from the same tier). Foundry 20 Reinforced Iron Plate + 10 Rotor + 40 Iron Plate (Satisfactory's is 10 Modular Frame + 10 Rotor + 20 Concrete; Concrete is left out and Modular Frames are in the Foundry's own tier). |
+
 ## Belts and ports (Stage 2)
 
 | Item | Choice |
@@ -193,7 +239,7 @@ Recipes, extraction rates and power use follow Satisfactory, checked against the
 | Item | Choice |
 | --- | --- |
 | Lines | Power Line tool (L), or Connect in a structure's panel: click a pole or structure, then another. Up to 14 tiles, center to center; not across cliffs (water is fine). A pole takes 4 lines, other structures 2. Each line costs 1 Cable, refunded when it goes. Structures and poles joined by lines form a grid. |
-| Supply | Solar Generator 4 MW, always (SPEC: no fuel, weak for its space; Satisfactory's Coal Generator makes 75 MW). Coal and Fuel Generators come in Stage 4a. |
+| Supply | Solar Generator 4 MW, always (SPEC: no fuel, weak for its space; Satisfactory's Coal Generator makes 75 MW). Coal and Fuel Generators (Stage 4a) supply while they have fuel; see Materials and machines. |
 | Blowing | Each tick, a grid's demand is what its working structures draw. If it goes over the grid's supply, the grid blows: everything on it stops until the player restarts it with **Restart grid** in any of its structures' panels (SPEC). A grid with no generator has no power but does not blow. Joining a blown grid to a working one gives one blown grid. |
 | The Hub | Works without power. |
 
@@ -203,13 +249,14 @@ Recipes, extraction rates and power use follow Satisfactory, checked against the
 - Logo: the full Croswell Industries logo on Home; the C mark in the gap left of the bottom stripes on the other screens, and in the slim stripe under a match.
 - App icon: a cream gear with a red chevron pointing up, on navy.
 - In-game colors (Caleb after Stage 1: slightly darker and grittier, like StarCraft): simplified real colors, muted and dusty, flat with navy outlines. Dusty olive ground with darker and lighter patches, bare dirt in places, tiny specks of grit, pebbles, grass tufts and small cracks; blue-grey water with paler shallows at the shore; dark grey-brown rock cliffs with grit and cracks; very dark navy fog; a dark backdrop around the map. Ores: iron rust red, copper orange with green flecks, gold yellow with a glint, quartz pale pink crystals, coal near-black, sulfur pale yellow, oil a black pool.
-- Structures are worn grey metal machines with grime toward the bottom of their walls, panel seams, and a band of the owner's color: the Hub's transmitter tower with a blinking light and rings going out (the spec says directives are sent from the Hub), a lattice-tower Drill, a glowing Smelter with a chimney, a Constructor with a moving arm, a Deployer with a hangar door, a wooden-crate Depot, a tilted Solar panel on legs, a domed Laboratory. The structures from later stages are plain boxes until they are built.
+- Structures are worn grey metal machines with grime toward the bottom of their walls, panel seams, and a band of the owner's color: the Hub's transmitter tower with a blinking light and rings going out (the spec says directives are sent from the Hub), a lattice-tower Drill, a glowing Smelter with a chimney, a Constructor with a moving arm, a Deployer with a hangar door, a wooden-crate Depot, a tilted Solar panel on legs, a domed Laboratory. Stage 4a: an Assembler with two arms over an open bay, a dark Foundry with a glowing crucible and a tall stack, a Refinery of two columns joined by a pipe with a flare on top while it works, a Manufacturer with a raised roof, vents and a wide door, a nodding Pump, a Coal Generator with a smoking stack and a Fuel Generator with two tanks (both smoke while burning). The structures from later stages are plain boxes until they are built.
+- Pipes (Stage 4a) are grey tubes on short stands, with a flange at the end they flow out of and a stripe of the fluid's color along the top. New items have their own small pictures (plates, beams, frames, motors, boards, boxes, powders and drops of fluid), in simplified real colors.
 - Belts are dark rubber between metal rails, with chevrons crawling the way they run and a bend where one joins from the side; items ride on them as small pictures (ore rocks, ingot bars, plates, rods, screws, coils). Splitters and mergers are low metal boxes with red arrows for the ways out. Power Poles are posts with a cross arm; lines are dark wires that sag a little. Machines move only while they work (the Drill's bit, the Smelter's glow, the Constructor's arm).
 - Minutemen are stick figures in the owner's color with a helmet, as in Stickman Arena, with a walking stride and a forward strike when they hit.
 - Other players' units and structures show only on explored ground (where explored ground shows everything, Caleb).
 - Player colors: Blue, Orange, Green and Purple, slightly deepened to sit with the darker colors (chosen in the lobby in Stage 6). Red is kept for the interface: selections, warnings, move markers. Single-player is Blue.
 
-## Performance (measured at the end of Stage 3)
+## Performance (measured at the end of Stage 3; Stage 4a rows added)
 
 Measured in headless Chromium on this build machine, 1440 × 860 screen, at normal (1×) and high (2×, as on most laptops) pixel density. It draws in software with no graphics card, so a real Chrome should do at least as well.
 
@@ -226,6 +273,9 @@ Measured in headless Chromium on this build machine, 1440 × 860 screen, at norm
 | Zooming nonstop between 40% and 100% | 1×: about 38 frames a second; 2×: about 22, while the zoom keeps changing. |
 | Belts, simulation: 2,400 belt tiles, all full | 0.16 ms a tick. |
 | Belts, drawing: about 880 belt tiles full of items on screen | 1×: 60 frames a second at 100% and 40%. 2×: 30. Belt tiles and items are stamped from cached pictures (before that, 1× was 30 and 2× 20). |
+| Stage 4a: about 300 Minutemen fighting next to 500–670 pipe tiles full of fluid and 15–19 of the new structures, all on screen at 100% | 1×: 60 frames a second. 2×: about 36 (pipes alone with the fight, or structures alone with it: about 46). Each pipe tile is one cached picture with its fluid stripe; drawing them as separate fluid blobs gave 2× about 30. |
+| Stage 4a: units ordered to places walled off by belts or pipes | Before: single ticks of up to 330 ms, each unit searching the whole map for a way in. After (open areas worked out when something is built or removed): worst tick about 2 ms; 120 units ordered into a ring of belts in 11 ms. |
+| Stage 4a: simulation checks | Research (31 bundles, 300 random grids), a Coal Generator running an Assembler, and Pump → pipe → Refinery on a Fuel Generator all pass in `npm run check:sim`; the battle load is unchanged (about 1 ms a tick on average). |
 
 How drawing keeps up:
 

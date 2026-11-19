@@ -1,25 +1,27 @@
-import { DRILL_BUFFER, DRILL_TICKS, HUB_CAPACITY, INPUT_CYCLES, OUTPUT_BUFFER } from './content/economy';
-import { ITEM_IDS, RESOURCE_ITEM, bagAdd, bagTotal, type Bag, type ItemId } from './content/items';
-import { RECIPES } from './content/recipes';
+import { DRILL_BUFFER, DRILL_TICKS, FUEL_BUFFER, fuelsOf, HUB_CAPACITY, INPUT_CYCLES, OUTPUT_BUFFER, PUMP_TICKS } from './content/economy';
+import { ITEMS, ITEM_IDS, RESOURCE_ITEM, bagAdd, bagTotal, isFluid, type Bag, type ItemId } from './content/items';
+import { RECIPES, isMachineKind } from './content/recipes';
 import { STRUCTURES, type Cost } from './content/structures';
 import { TICK_RATE } from './constants';
-import { DIRECT_PERIOD } from './content/transport';
+import { DIRECT_FLUID_PERIOD, DIRECT_PERIOD } from './content/transport';
 import { deliver, powered } from './flow';
 import { gridSupply, updateGrids } from './power';
 import { cache, getPlayer, unitCountOf, type MatchState, type Player, type Structure } from './state';
 import { isProducer, partsInProgress, producerRoom, producerWants, producerWork } from './production';
 import { UNIT_LIMIT } from './constants';
+import { recipeUnlocked } from './research';
 
-// Structures at work: power for each grid, Drills gathering, Smelters and Constructors running
-// their recipes, and products going out through output ports. Also what the player does by
-// hand: moving items between the Hub and a structure, and choosing a recipe.
+// Structures at work: power for each grid, generators burning fuel, Drills and Pumps gathering,
+// machines running their recipes, and products going out through output ports. Also what the
+// player does by hand: moving items between the Hub and a structure, and choosing a recipe.
 
-const isMachine = (t: Structure) => t.kind === 'smelter' || t.kind === 'constructor';
+const isMachine = (t: Structure) => isMachineKind(t.kind);
+const isFuelGenerator = (t: Structure) => !!fuelsOf(t.kind);
 
 /** Whether a structure would draw power this tick (SPEC: a grid blows on current demand). */
 function wantsToWork(s: MatchState, t: Structure): boolean {
   if (isProducer(t)) return producerWants(s, t);
-  if (t.kind === 'drill') return bagTotal(t.out) < DRILL_BUFFER;
+  if (t.kind === 'drill' || t.kind === 'pump') return bagTotal(t.out) < DRILL_BUFFER;
   if (t.kind === 'depot') return true;
   if (isMachine(t)) {
     if (!t.recipe) return false;
@@ -40,6 +42,14 @@ function canStart(t: Structure): boolean {
 /** One tick of every structure: power, work, then products out. */
 export function tickStructures(s: MatchState) {
   updateGrids(s);
+  // A generator with no energy left burns its next piece of fuel, if it has one.
+  for (const t of s.structures) {
+    if (t.buildLeft > 0 || !isFuelGenerator(t) || t.energy > 0 || t.blown) continue;
+    const fuel = fuelsOf(t.kind)!.find((id) => (t.inv[id] ?? 0) > 0);
+    if (!fuel) continue;
+    bagAdd(t.inv, fuel, -1);
+    t.energy += ITEMS[fuel].energy! * TICK_RATE;
+  }
   const supply = gridSupply(s);
 
   // Demand per grid from the structures that would work this tick.
@@ -60,6 +70,16 @@ export function tickStructures(s: MatchState) {
   }
   for (const t of s.structures) if (blowNow.has(t.grid)) t.blown = true;
 
+  // Fuel burns in proportion to what the grid draws (a grid running at half its supply burns
+  // half as fast), as in Satisfactory.
+  for (const t of s.structures) {
+    if (!isFuelGenerator(t) || t.energy <= 0 || t.blown) continue;
+    const d = demand.get(t.grid) ?? 0;
+    const sup = supply.get(t.grid) ?? 0;
+    if (d <= 0 || sup <= 0) continue;
+    t.energy = Math.max(0, t.energy - Math.ceil((STRUCTURES[t.kind].powerOut * d) / sup));
+  }
+
   for (const t of s.structures) {
     if (t.buildLeft > 0) {
       t.status = 'building';
@@ -75,7 +95,7 @@ export function tickStructures(s: MatchState) {
       continue;
     }
     if (def.powerOut > 0) {
-      t.status = 'working';
+      t.status = isFuelGenerator(t) && t.energy <= 0 ? 'noInput' : 'working';
       continue;
     }
     if ((supply.get(t.grid) ?? 0) <= 0) {
@@ -84,7 +104,7 @@ export function tickStructures(s: MatchState) {
     }
     if (!wants.get(t.id)) {
       if (isProducer(t)) t.status = !t.produce ? 'noRecipe' : unitCountOf(s, t.owner) >= UNIT_LIMIT ? 'atLimit' : 'noInput';
-      else t.status = isMachine(t) ? (!t.recipe ? 'noRecipe' : t.progress === 0 && !inputsReady(t) ? 'noInput' : 'outputFull') : t.kind === 'drill' ? 'outputFull' : 'idle';
+      else t.status = isMachine(t) ? (!t.recipe ? 'noRecipe' : t.progress === 0 && !inputsReady(t) ? 'noInput' : 'outputFull') : t.kind === 'drill' || t.kind === 'pump' ? 'outputFull' : 'idle';
       continue;
     }
     t.status = 'working';
@@ -99,12 +119,15 @@ export function tickStructures(s: MatchState) {
     if (!outPorts.length) continue;
     const source = t.kind === 'depot' ? t.inv : t.out;
     if (bagTotal(source) === 0) continue;
+    // Ports that touch pass at a belt's rate, fluid ports at a pipe's.
     const direct = (s.tick + t.id) % DIRECT_PERIOD === 0;
+    const directFluid = (s.tick + t.id) % DIRECT_FLUID_PERIOD === 0;
     for (let k = 0; k < outPorts.length; k++) {
       const port = outPorts[(t.rr + k) % outPorts.length];
-      const item = firstItem(source);
-      if (!item) break;
-      if (deliver(s, t.owner, port.x, port.y, port.dir, item, direct)) {
+      // Fluid ports send fluids, solid ports solids.
+      const item = firstItem(source, port.fluid);
+      if (!item) continue;
+      if (deliver(s, t.owner, port.x, port.y, port.dir, item, port.fluid ? directFluid : direct)) {
         bagAdd(source, item, -1);
         t.rr = (t.rr + 1) % outPorts.length;
       }
@@ -117,18 +140,18 @@ function inputsReady(t: Structure) {
   return !!r && r.inputs.every(([id, n]) => (t.inv[id] ?? 0) >= n);
 }
 
-function firstItem(b: Bag): ItemId | undefined {
-  for (const id of ITEM_IDS) if ((b[id] ?? 0) > 0) return id;
+function firstItem(b: Bag, fluid: boolean): ItemId | undefined {
+  for (const id of ITEM_IDS) if ((b[id] ?? 0) > 0 && isFluid(id) === fluid) return id;
   return undefined;
 }
 
 function work(s: MatchState, t: Structure) {
   if (isProducer(t)) return producerWork(s, t);
-  if (t.kind === 'drill') {
+  if (t.kind === 'drill' || t.kind === 'pump') {
     const node = s.map.nodes[s.nodeAt[t.y * s.size + t.x] - 1];
     if (!node) return;
     t.progress++;
-    if (t.progress >= DRILL_TICKS[node.purity]) {
+    if (t.progress >= (t.kind === 'pump' ? PUMP_TICKS : DRILL_TICKS)[node.purity]) {
       t.progress = 0;
       bagAdd(t.out, RESOURCE_ITEM[node.resource], 1);
     }
@@ -201,6 +224,7 @@ export function takeToHub(s: MatchState, player: number, id: number, item: ItemI
 export function giveRoom(t: Structure, item: ItemId): number {
   if (t.buildLeft > 0) return 0;
   if (isProducer(t)) return producerRoom(t, item);
+  if (isFuelGenerator(t)) return fuelsOf(t.kind)!.includes(item) ? Math.max(0, FUEL_BUFFER - bagTotal(t.inv)) : 0;
   if (isMachine(t)) {
     const r = t.recipe ? RECIPES[t.recipe] : undefined;
     const need = r?.inputs.find(([i]) => i === item);
@@ -227,7 +251,7 @@ export function setRecipe(s: MatchState, player: number, id: number, recipe: str
   if (!p || !t || t.owner !== player || !isMachine(t)) return;
   if (recipe !== null) {
     const r = RECIPES[recipe];
-    if (!r || r.machine !== t.kind || !r.atStart) return;
+    if (!r || r.machine !== t.kind || !recipeUnlocked(p, r)) return;
   }
   if (recipe === t.recipe) return;
   returnBag(p, contents(t));

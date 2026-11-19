@@ -3,6 +3,7 @@ import { STRUCTURES, type StructureKind } from './content/structures';
 import { POWER_LINE, type TransportKind } from './content/transport';
 import { placeBelts, removeBelts, type BeltTile } from './belts';
 import { addStructure } from './factory';
+import { research, structureUnlocked } from './research';
 import { canAfford, contents, giveFromHub, pay, refund, restartGrid, returnBag, setRecipe, takeToHub } from './economy';
 import { FP } from './fmath';
 import { findPath, nearestOpen, spreadTiles } from './path';
@@ -33,7 +34,8 @@ export type Command =
   | { type: 'mode'; player: number; id: number; mode: 'auto' | 'directed'; imperative: Imperative }
   | { type: 'rally'; player: number; id: number; x: number; y: number }
   | { type: 'patrol'; player: number; id: number; points: number[] }
-  | { type: 'placeUnit'; player: number; kind: UnitKind; x: number; y: number };
+  | { type: 'placeUnit'; player: number; kind: UnitKind; x: number; y: number }
+  | { type: 'research'; player: number; id: string };
 
 export function applyCommand(s: MatchState, c: Command) {
   switch (c.type) {
@@ -71,6 +73,8 @@ export function applyCommand(s: MatchState, c: Command) {
       return setPatrol(s, c.player, c.id, c.points);
     case 'placeUnit':
       return placeUnit(s, c.player, c.kind, c.x, c.y);
+    case 'research':
+      return research(s, c.player, c.id);
   }
 }
 
@@ -143,7 +147,7 @@ function build(s: MatchState, player: number, kind: StructureKind, x: number, y:
   const p = getPlayer(s, player);
   if (!p || kind === 'hub') return;
   const def = STRUCTURES[kind];
-  if (!def.atStart) return; // Research (Stage 4) unlocks the rest.
+  if (!structureUnlocked(p, kind)) return; // research unlocks structures
   const r = ((rot % 4) + 4) % 4;
   if (!canPlace(s, player, kind, x, y, r).ok) return;
   if (!canAfford(p, def.cost)) return;

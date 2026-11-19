@@ -37,8 +37,6 @@ export interface UnitDef {
   seconds: number;
   /** Seconds to make at the Hub when placed by hand (SPEC: usually short). */
   hubSeconds: number;
-  /** Unlocked at the start of a match (SPEC: the Minuteman). */
-  atStart: boolean;
 }
 
 /** Tiles per second to sub-units per tick. */
@@ -46,7 +44,7 @@ const tps = (tilesPerSecond: number) => Math.round((tilesPerSecond * FP) / TICK_
 /** Tiles to sub-units. */
 const tiles = (n: number) => Math.round(n * FP);
 
-const later = { parts: [] as Cost, seconds: 10, hubSeconds: 4, atStart: false };
+const later = { parts: [] as Cost, seconds: 10, hubSeconds: 4 };
 
 const defs: UnitDef[] = [
   { kind: 'hauler', name: 'Hauler', attack: 'none', air: false, speed: tps(3), sight: 6, hp: 120, damage: 0, range: 0, cooldown: 20, producedAt: 'garage', ...later },
@@ -69,7 +67,6 @@ const defs: UnitDef[] = [
     producedAt: 'deployer',
     seconds: 6,
     hubSeconds: 3,
-    atStart: true,
   },
   { kind: 'burner', name: 'Burner', attack: 'melee', air: false, speed: tps(2.6), sight: 7, hp: 110, damage: 4, range: tiles(1.4), cooldown: 8, producedAt: 'deployer', ...later },
   { kind: 'vanguard', name: 'Vanguard', attack: 'melee', air: false, speed: tps(2.4), sight: 7, hp: 260, damage: 10, range: tiles(0.85), cooldown: 24, producedAt: 'deployer', ...later },

@@ -1,5 +1,5 @@
 import { DX, DY, portsOf, type Port, type StructureKind } from '../sim/content/structures';
-import type { TransportKind } from '../sim/content/transport';
+import { PIPE_SPACING, type TransportKind } from '../sim/content/transport';
 import { FP } from '../sim/fmath';
 import { NODE_SIZE } from '../sim/map/types';
 import { cache, type Belt, type MatchState } from '../sim/state';
@@ -12,7 +12,7 @@ import { PULSE_REACH } from '../sim/constants';
 import { SpriteCache } from './sprites';
 import * as C from './style';
 import { MAX_CACHE_SCALE, TerrainCache, drawTiles } from './terrain';
-import { ITEM_BOUNDS, beltItemSpot, drawBelt, drawItemIcon, drawPortArrow, drawPowerLine, drawSplitterMerger, drawStatusBadge, lineAnchor } from './transport';
+import { ITEM_BOUNDS, beltItemSpot, drawBelt, drawItemIcon, drawPipe, drawPortArrow, drawPowerLine, drawSplitterMerger, drawStatusBadge, lineAnchor } from './transport';
 
 export interface Ghost {
   kind: StructureKind;
@@ -90,16 +90,21 @@ type Drawable = { depth: number; draw: (ctx: CanvasRenderingContext2D) => void }
 
 const WALK_FRAMES = 8;
 const BELT_FRAMES = 8;
-const BELT_BOUNDS = { left: -36, top: -20, right: 36, bottom: 20 };
+/** A pipe tile holds this many bits of fluid when full (FP / PIPE_SPACING). */
+const PIPE_FULL = FP / PIPE_SPACING;
+const BELT_BOUNDS = { left: -36, top: -24, right: 36, bottom: 20 };
 const FIGURE_BOUNDS = { left: -13, top: -34, right: 13, bottom: 6 };
 const RING_BOUNDS = { left: -13, top: -7, right: 13, bottom: 7 };
 
 /** The side a belt is fed from when another belt points into it from the side (an elbow), or null. */
-export function beltFeed(s: MatchState, b: { x: number; y: number; dir: number }): number | null {
+export function beltFeed(s: MatchState, b: { x: number; y: number; dir: number; kind?: string }): number | null {
   const at = (x: number, y: number) => (x < 0 || y < 0 || x >= s.size || y >= s.size ? 0 : s.beltAt[y * s.size + x]);
   const c = cache(s);
+  // Pipes join pipes; belts join belts.
+  const pipe = (b as { kind?: string }).kind === 'pipe';
+  const same = (id: number) => (c.beltById.get(id)?.kind === 'pipe') === pipe;
   const behind = at(b.x - DX[b.dir], b.y - DY[b.dir]);
-  if (behind && c.beltById.get(behind)?.dir === b.dir) return null;
+  if (behind && same(behind) && c.beltById.get(behind)?.dir === b.dir) return null;
   const sid = (() => {
     const x = b.x - DX[b.dir];
     const y = b.y - DY[b.dir];
@@ -108,7 +113,7 @@ export function beltFeed(s: MatchState, b: { x: number; y: number; dir: number }
   if (sid) return null;
   for (const m of [(b.dir + 1) % 4, (b.dir + 3) % 4]) {
     const id = at(b.x - DX[m], b.y - DY[m]);
-    if (id && c.beltById.get(id)?.dir === m) return m;
+    if (id && same(id) && c.beltById.get(id)?.dir === m) return m;
   }
   return null;
 }
@@ -178,9 +183,10 @@ export class Renderer {
     // Belts lie flat on the ground, with their items on top.
     const colorOf = new Map(s.players.map((p) => [p.id, p.color]));
     const flatBelts: { b: Belt; from: number | null }[] = [];
+    const pipes: { b: Belt; from: number | null }[] = [];
     for (const b of s.belts) {
-      if (b.kind !== 'belt' || !inView(b.x, b.y, 1) || !seen(b.x, b.y)) continue;
-      flatBelts.push({ b, from: beltFeed(s, b) });
+      if ((b.kind !== 'belt' && b.kind !== 'pipe') || !inView(b.x, b.y, 1) || !seen(b.x, b.y)) continue;
+      (b.kind === 'pipe' ? pipes : flatBelts).push({ b, from: beltFeed(s, b) });
     }
     // Units walking to spots placed by hand.
     for (const t of v.placed) {
@@ -202,12 +208,22 @@ export class Renderer {
       const dy = isoY(b.x + 0.5, b.y + 0.5) * k + offY;
       this.sprites.stamp(ctx, `belt:${b.dir}:${from}:${beltFrame}`, k, v.zoomSettled, dx, dy, BELT_BOUNDS, (g) => drawBelt(g, -0.5, -0.5, b.dir, from, (beltFrame / BELT_FRAMES) * 1000));
     }
+    // Pipes: one cached picture per direction, bend, fluid and how full (5 steps), back to front.
+    pipes.sort((a, b) => a.b.x + a.b.y - (b.b.x + b.b.y));
+    for (const { b, from } of pipes) {
+      const dx = isoX(b.x + 0.5, b.y + 0.5) * k + offX;
+      const dy = isoY(b.x + 0.5, b.y + 0.5) * k + offY;
+      const fluid = b.items.length ? b.items[0].item : null;
+      const n = b.items.length;
+      this.sprites.stamp(ctx, `pipe:${b.dir}:${from}:${fluid}:${n}`, k, v.zoomSettled, dx, dy, BELT_BOUNDS, (g) => drawPipe(g, -0.5, -0.5, b.dir, from, fluid, n / PIPE_FULL));
+    }
     world();
-    for (const { b } of flatBelts) if (b.id === v.selectedBelt) outline(b.x, b.y, 1, 1, C.RED, 2.5);
+    for (const { b } of [...flatBelts, ...pipes]) if (b.id === v.selectedBelt) outline(b.x, b.y, 1, 1, C.RED, 2.5);
     if (v.beltGhost) {
       ctx.globalAlpha = 0.75;
       for (const t of v.beltGhost.tiles) {
         if (v.beltGhost.kind === 'belt') drawBelt(ctx, t.x, t.y, t.dir, null, v.time, true);
+        else if (v.beltGhost.kind === 'pipe') drawPipe(ctx, t.x, t.y, t.dir, null);
         else drawSplitterMerger(ctx, v.beltGhost.kind, t.x, t.y, t.dir, C.PLAYER_COLORS[me.color].main, C.PLAYER_COLORS[me.color].dark);
         if (!t.ok) {
           footprintPath(ctx, t.x, t.y, 1, 1);
@@ -241,7 +257,7 @@ export class Renderer {
       items.push({ depth: n.x + n.y + 2, draw: (g) => drawNode(g, n, v.time) });
     }
     for (const b of s.belts) {
-      if (b.kind === 'belt' || !inView(b.x, b.y, 1) || !seen(b.x, b.y)) continue;
+      if (b.kind === 'belt' || b.kind === 'pipe' || !inView(b.x, b.y, 1) || !seen(b.x, b.y)) continue;
       const col = C.PLAYER_COLORS[colorOf.get(b.owner) ?? 0];
       items.push({
         depth: b.x + b.y + 1,

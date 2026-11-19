@@ -5,6 +5,7 @@
 
 import { MAPS, getMap } from '../src/sim/map/maps.ts';
 import { Tile } from '../src/sim/map/types.ts';
+import { FP } from '../src/sim/fmath.ts';
 import { createMatch, spawnUnit } from '../src/sim/match.ts';
 import { UNITS } from '../src/sim/content/units.ts';
 import { PULSE_DAMAGE, UNIT_LIMIT } from '../src/sim/constants.ts';
@@ -16,6 +17,10 @@ import type { Command } from '../src/sim/commands.ts';
 import { DX, DY, STRUCTURES, portsOf, type StructureKind } from '../src/sim/content/structures.ts';
 import { canPlace } from '../src/sim/placement.ts';
 import { canPlaceBelt } from '../src/sim/belts.ts';
+import { BUNDLES, BUNDLE_LIST } from '../src/sim/content/research.ts';
+import { RECIPE_LIST } from '../src/sim/content/recipes.ts';
+import { ITEM_LIST } from '../src/sim/content/items.ts';
+import { isReady, makeTree, researchable } from '../src/sim/research.ts';
 import { TICK_RATE } from '../src/sim/constants.ts';
 
 let failed = false;
@@ -562,6 +567,202 @@ const near = (s: ReturnType<typeof createMatch>, tile: number, n: number) => spr
   }
   const avg = (performance.now() - t0) / (20 * 60);
   console.log(`Battle load: ${s.players.length} x 200 Aggressive Minutemen marching to one spot and fighting for 60 s: ${avg.toFixed(2)} ms a tick on average, worst ${worst.toFixed(1)} ms; ${s.units.length} left.`);
+}
+
+// Research (Stage 4a): the tree can always be finished.
+{
+  // Which items can be made with the bundles of tiers below t: raw resources (Drills from the
+  // start; Crude Oil once Pumps are unlocked) and the products of unlocked recipes whose machine
+  // is unlocked and whose inputs can be made.
+  const machineBundle: Record<string, string> = { smelter: 'basics', constructor: 'basics', assembler: 'assembly', foundry: 'steel', refinery: 'oil', manufacturer: 'manufacturing' };
+  const makeable = (tier: number) => {
+    const ok = new Set<string>(['basics']);
+    for (const bd of BUNDLE_LIST) if (bd.tier < tier) ok.add(bd.id);
+    const items = new Set<string>(['ironOre', 'copperOre', 'goldOre', 'rawQuartz', 'coal', 'sulfur']);
+    if (ok.has('oil')) items.add('crudeOil');
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const rc of RECIPE_LIST) {
+        if (!ok.has(rc.unlock) || !ok.has(machineBundle[rc.machine])) continue;
+        if (!rc.inputs.every(([id]) => items.has(id))) continue;
+        for (const [id] of rc.outputs)
+          if (!items.has(id)) {
+            items.add(id);
+            changed = true;
+          }
+      }
+    }
+    return items;
+  };
+  for (const bd of BUNDLE_LIST) {
+    const can = makeable(bd.tier);
+    for (const [id] of bd.cost) if (!can.has(id)) fail(`research: ${bd.name} (tier ${bd.tier}) costs ${id}, which lower tiers cannot make`);
+  }
+  // Every spec material can be made once everything is researched.
+  const all = makeable(99);
+  for (const it of ITEM_LIST) if (!all.has(it.id)) fail(`research: nothing makes ${it.name}`);
+  // Every structure's cost can be paid once its bundle is researched.
+  for (const bd of BUNDLE_LIST) {
+    const can = makeable(bd.tier + 1);
+    for (const k of bd.structures) for (const [id] of STRUCTURES[k].cost) if (!can.has(id)) fail(`research: ${STRUCTURES[k].name} costs ${id}, not makeable by its tier`);
+  }
+  // Grids: for many seeds, every bundle is reachable by stepping to neighbors, tier by tier.
+  let worst = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const tree = makeTree({ rng: seed * 7919 });
+    const at = new Map(tree.map((c) => [`${c.col}:${c.row}`, c]));
+    if (at.size !== tree.length) fail(`research: seed ${seed} put two bundles on one cell`);
+    const seen = new Set([tree[0].id]);
+    const queue = [tree[0]];
+    for (let i = 0; i < queue.length; i++) {
+      const c = queue[i];
+      for (const k of [`${c.col + 1}:${c.row}`, `${c.col - 1}:${c.row}`, `${c.col}:${c.row + 1}`, `${c.col}:${c.row - 1}`]) {
+        const n = at.get(k);
+        // Only step to the same tier or the next one up: no bundle needs a higher tier first.
+        if (!n || seen.has(n.id) || n.col > c.col + 1 || (n.col > c.col && BUNDLES[n.id].tier > BUNDLES[c.id].tier + 1)) continue;
+        seen.add(n.id);
+        queue.push(n);
+      }
+    }
+    if (seen.size !== tree.length) fail(`research: seed ${seed} leaves ${tree.length - seen.size} bundles out of reach`);
+    worst = Math.max(worst, Math.max(...tree.map((c) => c.row)) + 1);
+  }
+  console.log(`Research: ${BUNDLE_LIST.length} bundles in ${Math.max(...BUNDLE_LIST.map((x) => x.tier))} tiers; every cost is made from lower tiers; 300 random grids all reachable (up to ${worst} rows).`);
+}
+{
+  // Researching with a powered Laboratory; then an Assembler makes Reinforced Iron Plates; Coal
+  // Generators burn coal fed by belt and by hand; a Pump, pipes and a Refinery make Plastic.
+  const s = createMatch({ mapId: 'basin', seed: 41, players: [{ name: 'A', color: 0 }] });
+  const me = s.players[0];
+  me.explored.fill(1);
+  me.hub = { ironPlate: 3000, ironRod: 2000, screws: 3000, wire: 2000, cable: 2000, reinforcedIronPlate: 500, rotor: 500, copperSheet: 2000, modularFrame: 300, steelPipe: 500, steelBeam: 500, motor: 300, smartPlating: 100, quickwire: 500, stator: 200, blackPowder: 300, quartzCrystal: 100, coal: 400 };
+  const run = (n: number, cmds: Command[] = []) => {
+    step(s, cmds);
+    for (let i = 1; i < n; i++) step(s, []);
+  };
+  const hub = s.structures[0];
+  const spot = (kind: StructureKind, rot = 0, avoid: { x: number; y: number; w: number; h: number }[] = [], near: { x: number; y: number } = hub, from = 6) => {
+    for (let r = from; r < 40; r++)
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          const x = near.x + dx;
+          const y = near.y + dy;
+          const { w, h } = { w: STRUCTURES[kind].w + 2, h: STRUCTURES[kind].h + 2 };
+          if (avoid.some((a) => x < a.x + a.w + 1 && x + w > a.x - 1 && y < a.y + a.h + 1 && y + h > a.y - 1)) continue;
+          if (canPlace(s, 1, kind, x, y, rot).ok && canPlace(s, 1, kind, x - 1, y - 1, rot).ok && canPlace(s, 1, kind, x + 1, y + 1, rot).ok) return { x, y };
+        }
+    throw new Error('no spot for ' + kind);
+  };
+  const used: { x: number; y: number; w: number; h: number }[] = [];
+  const place = (kind: StructureKind, rot = 0) => {
+    const p = spot(kind, rot, used);
+    used.push({ x: p.x, y: p.y, w: STRUCTURES[kind].w, h: STRUCTURES[kind].h });
+    run(1, [{ type: 'build', player: 1, kind, x: p.x, y: p.y, rot }]);
+    return s.structures[s.structures.length - 1];
+  };
+  // Research needs a Laboratory with power.
+  const first = [...researchable(me)][0];
+  run(1, [{ type: 'research', player: 1, id: first }]);
+  const refusedWithoutLab = !me.researched.includes(first);
+  const lab = place('laboratory');
+  const sol = [place('solar'), place('solar')];
+  run(20 * 9, [{ type: 'line', player: 1, a: sol[0].id, b: sol[1].id }]);
+  run(1, [{ type: 'line', player: 1, a: sol[1].id, b: lab.id }]);
+  run(1, [{ type: 'research', player: 1, id: first }]);
+  if (!refusedWithoutLab || !me.researched.includes(first)) fail(`research: refused without a Laboratory ${refusedWithoutLab}; researched ${me.researched.join(', ')}`);
+  // Research everything that can be researched (ready bundles), as they open up.
+  for (let pass = 0; pass < 12; pass++) for (const id of researchable(me)) run(1, [{ type: 'research', player: 1, id }]);
+  // Hand the Hub what later tiers cost, then finish.
+  me.hub = { ...me.hub, plastic: 500, rubber: 500, circuitBoard: 300, aiLimiter: 100, versatileFramework: 100, automatedWiring: 100 };
+  for (let pass = 0; pass < 12; pass++) for (const id of researchable(me)) run(1, [{ type: 'research', player: 1, id }]);
+  const ready = BUNDLE_LIST.filter((x) => isReady(x)).length;
+  if (me.researched.length !== ready) fail(`research: ${me.researched.length} of ${ready} ready bundles researched`);
+  else console.log(`Research: needed a powered Laboratory; then all ${ready} bundles built so far were researched, paid from the Hub.`);
+
+  // Coal Generators: one fed by hand, powering an Assembler making Reinforced Iron Plates.
+  const coalGen = place('coalGenerator');
+  const asm = place('assembler');
+  run(20 * 8, []);
+  run(1, [{ type: 'line', player: 1, a: coalGen.id, b: asm.id }, { type: 'give', player: 1, id: coalGen.id, item: 'coal' }, { type: 'recipe', player: 1, id: asm.id, recipe: 'reinforcedIronPlate' }]);
+  run(1, [{ type: 'give', player: 1, id: asm.id, item: 'ironPlate' }, { type: 'give', player: 1, id: asm.id, item: 'screws' }]);
+  const coalBefore = coalGen.inv.coal ?? 0;
+  run(20 * 40);
+  const rip = asm.out.reinforcedIronPlate ?? 0;
+  const burned = coalBefore - (coalGen.inv.coal ?? 0);
+  // 15 MW of 75 MW is a fifth of full load: a coal lasts 4 s at full load, about 20 s here.
+  if (rip < 3) fail(`coal power: an Assembler on a Coal Generator made ${rip} Reinforced Iron Plates in 40 s`);
+  else if (burned > 4) fail(`coal power: ${burned} Coal burned in 40 s at a fifth of full load (expected about 2)`);
+  else console.log(`Coal power: a Coal Generator fed by hand ran an Assembler (${rip} Reinforced Iron Plates in 40 s), burning ${burned} Coal at a fifth of full load.`);
+
+  // Oil: a Pump on an oil node, a pipe to a Refinery making Plastic; Fuel by hand runs a Fuel Generator.
+  const oilNode = s.map.nodes.find((n) => n.resource === 'oil' && canPlace(s, 1, 'pump', n.x, n.y, 0).ok)!;
+  let pumped = false;
+  for (let rot = 0; rot < 4 && !pumped; rot++) {
+    const out = portsOf('pump', oilNode.x, oilNode.y, rot).find((p) => p.io === 'out')!;
+    const d = out.dir;
+    const tiles = Array.from({ length: 4 }, (_, k) => ({ x: out.ox + DX[d] * k, y: out.oy + DY[d] * k, dir: d }));
+    if (!tiles.every((t) => canPlaceBelt(s, 1, 'pipe', t.x, t.y).ok)) continue;
+    const ex = out.ox + DX[d] * 4;
+    const ey = out.oy + DY[d] * 4;
+    let ref: { x: number; y: number; rot: number } | null = null;
+    for (let r = 0; r < 4 && !ref; r++)
+      for (const p of portsOf('refinery', 0, 0, r)) if (p.io === 'in' && p.fluid && p.dir === (d + 2) % 4 && canPlace(s, 1, 'refinery', ex - p.x, ey - p.y, r).ok) ref = { x: ex - p.x, y: ey - p.y, rot: r };
+    if (!ref) continue;
+    run(1, [{ type: 'build', player: 1, kind: 'pump', x: oilNode.x, y: oilNode.y, rot }, { type: 'belts', player: 1, kind: 'pipe', tiles }, { type: 'build', player: 1, kind: 'refinery', ...ref }]);
+    pumped = true;
+  }
+  if (!pumped) fail('oil: no room for a Pump, pipe and Refinery');
+  else {
+    const pump = s.structures.find((t) => t.kind === 'pump')!;
+    const refinery = s.structures.find((t) => t.kind === 'refinery')!;
+    const at = spot('fuelGenerator', 0, [pump, refinery], refinery, 2);
+    run(1, [{ type: 'build', player: 1, kind: 'fuelGenerator', x: at.x, y: at.y, rot: 0 }]);
+    const fg = s.structures[s.structures.length - 1];
+    run(20 * 10);
+    me.hub.fuel = 100;
+    run(1, [{ type: 'line', player: 1, a: fg.id, b: pump.id }, { type: 'line', player: 1, a: fg.id, b: refinery.id }, { type: 'give', player: 1, id: fg.id, item: 'fuel' }, { type: 'recipe', player: 1, id: refinery.id, recipe: 'plastic' }]);
+    run(20 * 30);
+    const plastic = refinery.out.plastic ?? 0;
+    const hor = refinery.out.heavyOilResidue ?? 0;
+    if (plastic < 6 || hor < 3) fail(`oil: the Refinery made ${plastic} Plastic and ${hor} Heavy Oil Residue in 30 s (pump ${pump.status}, refinery ${refinery.status}, fuel gen ${fg.status})`);
+    else console.log(`Oil: Pump -> 4 pipe tiles -> Refinery, run by a Fuel Generator on Fuel added by hand: ${plastic} Plastic and ${hor} Heavy Oil Residue in 30 s.`);
+  }
+}
+
+// Walled off: units sent inside a ring of belts (which block units) stop at the nearest tile
+// outside it, and finding that is quick (no search of the whole map).
+{
+  const s = createMatch({ mapId: 'basin', seed: 43, players: [{ name: 'A', color: 0 }] });
+  const me = s.players[0];
+  me.explored.fill(1);
+  me.hub = { ironPlate: 500, ironRod: 500 };
+  const hub = s.structures[0];
+  // A ring of belt 7 tiles across, east of the Hub, on open ground.
+  let ring: { x: number; y: number; dir: number }[] = [];
+  let cx = 0;
+  let cy = 0;
+  search: for (let r = 10; r < 40; r++)
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++) {
+        cx = hub.x + dx;
+        cy = hub.y + dy;
+        ring = [];
+        for (let k = -3; k <= 3; k++) ring.push({ x: cx + k, y: cy - 3, dir: 0 }, { x: cx + k, y: cy + 3, dir: 0 }, ...(k > -3 && k < 3 ? [{ x: cx - 3, y: cy + k, dir: 1 }, { x: cx + 3, y: cy + k, dir: 1 }] : []));
+        let open = true;
+        for (let y = cy - 4; y <= cy + 4 && open; y++) for (let x = cx - 4; x <= cx + 4 && open; x++) if (!canPlaceBelt(s, 1, 'belt', x, y).ok || s.map.terrain[y * s.size + x] !== Tile.Ground) open = false;
+        if (open) break search;
+      }
+  const units: number[] = [];
+  for (const t of spreadTiles(s, (hub.y + 8) * s.size + hub.x - 8, 120)) units.push(spawnUnit(s, 1, 'minuteman', t, { mode: 'directed' }).id);
+  step(s, [{ type: 'belts', player: 1, kind: 'belt', tiles: ring }]);
+  const t0 = performance.now();
+  step(s, [{ type: 'move', player: 1, units, tx: cx, ty: cy }]);
+  const ms = performance.now() - t0;
+  for (let i = 0; i < 20 * 40; i++) step(s, []);
+  const inside = s.units.filter((u) => Math.abs(Math.floor(u.x / FP) - cx) < 3 && Math.abs(Math.floor(u.y / FP) - cy) < 3).length;
+  const near = s.units.filter((u) => Math.max(Math.abs(Math.floor(u.x / FP) - cx), Math.abs(Math.floor(u.y / FP) - cy)) <= 6).length;
+  if (inside > 0 || near < 10 || ms > 40) fail(`walled off: ${inside} units got inside the ring, ${near} stopped next to it, the order took ${ms.toFixed(1)} ms`);
+  else console.log(`Walled off: 120 units ordered inside a ring of belts; the order took ${ms.toFixed(1)} ms, none got in, ${near} stopped right outside.`);
 }
 
 // Load: 4 players with 200 units each (the unit limit), all ordered across the map at once.

@@ -39,6 +39,7 @@ export function addStructure(s: MatchState, owner: number, kind: StructureKind, 
     made: 0,
     lastPulse: -1000,
     lastHurt: -1000,
+    energy: 0,
   };
   s.structures.push(t);
   for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) s.occupied[yy * s.size + xx] = id;

@@ -1,10 +1,10 @@
 import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowDownToLine, ArrowUpFromLine, Menu, Minus, Plus, Power, RotateCw, Trash2, Unplug, Users, Warehouse } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, FlaskConical, Menu, Minus, Plus, Power, RotateCw, Trash2, Unplug, Users, Warehouse, X } from 'lucide-react';
 import { ITEMS } from '../../sim/content/items';
 import { IMPERATIVES, unitCount } from '../../sim/content/units';
 import { Button, Kbd, cx } from '../../components/ui';
-import { BUILD_MENU, type BuildEntry, type Game, type HudState, type SelectionInfo } from '../Game';
+import { BUILD_MENU, type BuildEntry, type Game, type HudState, type ResearchCell, type SelectionInfo } from '../Game';
 import { ItemIcon, ToolIcon } from './Icons';
 import { Minimap } from './Minimap';
 
@@ -17,8 +17,6 @@ function clock(seconds: number) {
   const s = seconds % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
 }
-
-const GROUPS: BuildEntry['group'][] = ['Production', 'Power', 'Transport'];
 
 /** Everything drawn over the map: clock, Hub inventory, zoom, minimap, selection and the build menu. */
 export function MatchHud({ game }: { game: Game }) {
@@ -37,6 +35,11 @@ export function MatchHud({ game }: { game: Game }) {
           <span className="px-2 font-mono text-sm tabular-nums text-ink" title="Match time">
             {clock(hud.seconds)}
           </span>
+          <Button size="sm" variant={hud.research ? 'primary' : 'ghost'} onClick={() => game.setResearchOpen(!hud.research)} title="Research (U)">
+            <FlaskConical className="size-4" />
+            Research
+            <Kbd className="ml-0.5">U</Kbd>
+          </Button>
         </Panel>
         <div className="flex min-w-0 flex-col items-center gap-2">
           <HubBar hud={hud} />
@@ -74,6 +77,7 @@ export function MatchHud({ game }: { game: Game }) {
         <BuildMenu game={game} hud={hud} color={color} />
       </div>
 
+      {hud.research && <ResearchPanel game={game} research={hud.research} />}
       {hud.menuOpen && <MatchMenu game={game} />}
     </div>
   );
@@ -108,15 +112,16 @@ function HubBar({ hud }: { hud: HudState }) {
 
 function BuildMenu({ game, hud, color }: { game: Game; hud: HudState; color: number }) {
   const [hover, setHover] = useState<BuildEntry | null>(null);
-  const group = game.group;
+  const group = hud.group;
   const shown = hover ?? BUILD_MENU.find((e) => e.id === hud.tool?.id) ?? null;
+  const shownKey = shown ? hud.keys[shown.id] : undefined;
   return (
     <div className="flex flex-col items-end gap-2">
       {shown && (
         <Panel className="w-80 p-3 text-sm">
           <div className="flex items-center justify-between">
             <span className="font-display text-lg uppercase leading-none">{shown.name}</span>
-            <Kbd>{shown.key}</Kbd>
+            {shownKey && <Kbd>{shownKey}</Kbd>}
           </div>
           <p className="mt-1 text-muted">{shown.blurb}</p>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -133,12 +138,14 @@ function BuildMenu({ game, hud, color }: { game: Game; hud: HudState; color: num
       )}
       <Panel className="p-2">
         <div className="mb-1.5 flex items-center justify-between gap-3 px-1">
-          <div className="flex gap-1">
-            {GROUPS.map((g) => (
+          <div className="flex items-center gap-1">
+            <span title="Previous tab (Q)"><Kbd className="px-1 py-0 text-[0.625rem]">Q</Kbd></span>
+            {hud.groups.map((g) => (
               <button key={g} onClick={() => game.setGroup(g)} className={cx('rounded-lg px-2.5 py-1 font-display text-[0.8125rem] uppercase tracking-[0.06em] transition', group === g ? 'bg-navy text-on-accent' : 'text-muted hover:bg-raised hover:text-ink')}>
                 {g}
               </button>
             ))}
+            <span title="Next tab (E)"><Kbd className="px-1 py-0 text-[0.625rem]">E</Kbd></span>
           </div>
           {hud.tool ? (
             <button className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-ink hover:bg-raised" onClick={() => game.rotateTool()} title="Rotate (R)">
@@ -149,20 +156,20 @@ function BuildMenu({ game, hud, color }: { game: Game; hud: HudState; color: num
           )}
         </div>
         <div className="flex gap-1">
-          {BUILD_MENU.filter((e) => e.group === group).map((e) => {
+          {hud.menu.map((e) => {
             const active = hud.tool?.id === e.id;
-            const can = hud.affordable[e.id];
+            const can = e.affordable;
             return (
               <button
                 key={e.id}
                 onClick={() => (active ? game.cancelTool() : game.startTool(e.id))}
-                onMouseEnter={() => setHover(e)}
+                onMouseEnter={() => setHover(BUILD_MENU.find((b) => b.id === e.id) ?? null)}
                 onMouseLeave={() => setHover(null)}
                 className={cx('relative flex w-[5.25rem] flex-col items-center rounded-xl border px-1 pb-1.5 pt-1 transition', active ? 'border-accent bg-accent/10' : 'border-transparent hover:bg-raised', !can && !active && 'opacity-45')}
               >
                 <ToolIcon id={e.id} color={color} />
                 <span className="mt-0.5 text-center text-[0.6875rem] font-medium leading-tight">{e.name}</span>
-                <Kbd className="absolute left-1 top-1 px-1 py-0 text-[0.625rem]">{e.key}</Kbd>
+                {e.key && <Kbd className="absolute left-1 top-1 px-1 py-0 text-[0.625rem]">{e.key}</Kbd>}
               </button>
             );
           })}
@@ -174,7 +181,9 @@ function BuildMenu({ game, hud, color }: { game: Game; hud: HudState; color: num
 
 function ToolHint({ id, lineFrom }: { id: BuildEntry['id']; lineFrom: boolean }) {
   const text =
-    id === 'belt'
+    id === 'pipe'
+      ? 'Press and drag to lay a line, as with belts. Pipes carry fluids one way, from fluid output ports to fluid input ports.'
+      : id === 'belt'
       ? 'Press and drag to lay a line; R changes which way it bends. A click lays one tile (R turns it). Belts feed into input ports (cream arrows) and take from output ports (red arrows).'
       : id === 'line'
         ? lineFrom
@@ -275,7 +284,7 @@ function SelectionPanel({ game, sel, hub }: { game: Game; sel: SelectionInfo | n
                 </span>
               </button>
             ))}
-            <span className="text-xs text-muted">More units come with research (Stage 4).</span>
+            <span className="text-xs text-muted">More units are unlocked by research.</span>
           </div>
           {sel.production.produce && sel.production.percent > 0 && <Bar value={sel.production.percent} max={100} accent label={`Making: ${sel.production.percent}%`} />}
         </Section>
@@ -360,6 +369,15 @@ function SelectionPanel({ game, sel, hub }: { game: Game; sel: SelectionInfo | n
               </Button>
             </div>
           ))}
+        </Section>
+      )}
+
+      {sel.isLab && sel.mine && (
+        <Section title="Research">
+          <Button size="xs" variant="primary" onClick={() => game.setResearchOpen(true)}>
+            <FlaskConical className="size-3.5" />
+            Open research <Kbd className="ml-1">U</Kbd>
+          </Button>
         </Section>
       )}
 
@@ -448,8 +466,11 @@ const CONTROLS: [string, string][] = [
   ['+ and -', 'Zoom in and out (or the buttons)'],
   ['H', 'Center on your Hub'],
   ['Click or drag the minimap', 'Move the camera there'],
-  ['1 to 7, P, L', 'Production structures, Solar Generator, Power Pole, Power Line'],
-  ['B, T, M', 'Belt (drag to lay a line), Splitter, Merger'],
+  ['Q and E', 'Previous and next build menu tab'],
+  ['1, 2, 3...', 'Structures in the build menu tab shown'],
+  ['P, L', 'Power Pole, Power Line'],
+  ['B, I, T, M', 'Belt and Pipe (drag to lay a line), Splitter, Merger'],
+  ['U', 'Open or close research'],
   ['R', 'Rotate what is being placed; while dragging a belt, change its bend'],
   ['Right click or Esc', 'Stop building'],
   ['Delete', 'Demolish the selected structure or belt (full refund)'],
@@ -481,6 +502,104 @@ function MatchMenu({ game }: { game: Game }) {
             </div>
           ))}
         </dl>
+      </div>
+    </div>
+  );
+}
+
+const CELL_LOOK: Record<ResearchCell['state'], string> = {
+  done: 'border-navy bg-navy text-on-accent',
+  open: 'border-accent bg-surface hover:bg-raised',
+  locked: 'border-line bg-raised/60 text-muted',
+  later: 'border-dashed border-line bg-transparent text-muted',
+};
+
+/**
+ * The research grid (SPEC "Research"; Caleb: a random grid of small bundles). Tiers run left to
+ * right; a bundle can be researched once one next to it (left, right, above or below) is.
+ */
+function ResearchPanel({ game, research }: { game: Game; research: NonNullable<HudState['research']> }) {
+  const [pick, setPick] = useState<string | null>(null);
+  const at = new Map(research.cells.map((c) => [`${c.col}:${c.row}`, c]));
+  const chosen = research.cells.find((c) => c.id === pick) ?? null;
+  return (
+    <div className="pointer-events-auto absolute inset-x-3 top-16 bottom-3 flex animate-rise flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
+        <div>
+          <p className="label-caps text-accent">
+            {research.done} of {research.total} researched
+          </p>
+          <h2 className="text-3xl leading-none">Research</h2>
+        </div>
+        <p className="max-w-md text-xs text-muted">
+          Research is instant and paid from the Hub. A bundle opens once one next to it is researched. Your grid is laid out at random; each column is one tier.
+        </p>
+        <Button size="sm" variant="ghost" onClick={() => game.setResearchOpen(false)} title="Close (U or Esc)" aria-label="Close research">
+          <X className="size-4" />
+        </Button>
+      </div>
+      {!research.hasLab && <div className="border-b border-line bg-accent/10 px-5 py-2 text-sm text-accent">Research needs a finished Laboratory with power.</div>}
+      <div className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1 overflow-auto p-4">
+          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${research.cols}, 11rem)` }}>
+            {Array.from({ length: research.cols }, (_, col) => (
+              <div key={col} className="label-caps text-center text-muted">
+                {col === 0 ? 'Start' : `Tier ${col}`}
+              </div>
+            ))}
+            {Array.from({ length: research.rows }, (_, row) =>
+              Array.from({ length: research.cols }, (_, col) => {
+                const c = at.get(`${col}:${row}`);
+                if (!c) return <div key={`${col}:${row}`} />;
+                return (
+                  <button key={c.id} onClick={() => setPick(c.id)} className={cx('flex h-[4.5rem] flex-col justify-between rounded-xl border-2 px-2.5 py-1.5 text-left transition', CELL_LOOK[c.state], pick === c.id && 'ring-2 ring-accent ring-offset-1')}>
+                    <span className="font-display text-[0.9375rem] uppercase leading-tight tracking-[0.04em]">{c.name}</span>
+                    <span className="text-[0.6875rem] leading-tight opacity-80">
+                      {c.state === 'done' ? 'Researched' : c.state === 'later' ? `Comes in Stage ${c.stage}` : c.state === 'open' ? (c.affordable ? 'Ready to research' : 'Open: needs materials') : 'Not reached yet'}
+                    </span>
+                  </button>
+                );
+              }),
+            )}
+          </div>
+        </div>
+        <div className="w-80 shrink-0 overflow-y-auto border-l border-line p-4">
+          {!chosen ? (
+            <p className="text-sm text-muted">Click a bundle to see what it costs and unlocks.</p>
+          ) : (
+            <div>
+              <p className="label-caps text-accent">{chosen.tier === 0 ? 'Known from the start' : `Tier ${chosen.tier}`}</p>
+              <h3 className="mt-1 text-2xl leading-none">{chosen.name}</h3>
+              <Section title="Unlocks">
+                {chosen.unlocks.length ? <p className="text-sm">{chosen.unlocks.join(', ')}</p> : <p className="text-sm text-muted">Nothing new by itself; it opens the way on.</p>}
+              </Section>
+              {chosen.cost.length > 0 && (
+                <Section title="Cost">
+                  {chosen.cost.map((k) => (
+                    <div key={k.item} className="flex items-center gap-2 text-sm tabular-nums">
+                      <ItemIcon item={k.item} />
+                      <span className="flex-1">
+                        {k.need} {k.name}
+                      </span>
+                      <span className={cx('font-mono text-xs', k.have >= k.need ? 'text-muted' : 'text-warn')}>{k.have} in Hub</span>
+                    </div>
+                  ))}
+                </Section>
+              )}
+              <div className="mt-4">
+                {chosen.state === 'done' && <p className="text-sm text-muted">Researched.</p>}
+                {chosen.state === 'later' && <p className="text-sm text-muted">What this unlocks is built in Stage {chosen.stage}. Until then it cannot be researched, but the way passes through it to the bundles beyond.</p>}
+                {chosen.state === 'locked' && <p className="text-sm text-muted">Research a bundle next to it first.</p>}
+                {chosen.state === 'open' && (
+                  <Button variant="primary" disabled={!chosen.affordable || !research.hasLab} onClick={() => game.research(chosen.id)}>
+                    <FlaskConical className="size-4" />
+                    Research
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -5,7 +5,7 @@ import { footprint, type StructureKind } from '../../sim/content/structures';
 import { HH, HW } from '../../render/iso';
 import { STRUCTURE_HEIGHT, drawStructure } from '../../render/objects';
 import { PLAYER_COLORS } from '../../render/style';
-import { drawBelt, drawItemIcon, drawPowerLine, drawSplitterMerger } from '../../render/transport';
+import { drawBelt, drawItemIcon, drawPipe, drawPowerLine, drawSplitterMerger } from '../../render/transport';
 
 // Small pictures for the interface, drawn with the same code as the map.
 
@@ -56,6 +56,11 @@ export function ToolIcon({ id, color = 0, size = 52 }: { id: ToolId; color?: num
         drawBelt(ctx, 0, 0, 0, null, 0, true);
         drawBelt(ctx, 1, 0, 1, 0, 0, true);
         drawBelt(ctx, 1, 1, 1, null, 0, true);
+      } else if (id === 'pipe') {
+        fit(ctx, px, -2 * HW, -10, 2 * HW, 3 * HH);
+        drawPipe(ctx, 0, 0, 0, null);
+        drawPipe(ctx, 1, 0, 1, 0);
+        drawPipe(ctx, 1, 1, 1, null);
       } else if (id === 'splitter' || id === 'merger') {
         fit(ctx, px, -HW, -12, HW, 2 * HH);
         drawSplitterMerger(ctx, id, 0, 0, 1, col.main, col.dark);

@@ -6,7 +6,7 @@ It is an installable web app (PWA) for computers, hosted on GitHub Pages.
 
 The game is built in stages, each tried before the next starts. What the game does is in [`SPEC.md`](SPEC.md) (Caleb's spec); the stage plan and every choice left to the builder are in [`docs/decisions.md`](docs/decisions.md).
 
-## What is in it so far (Stages 1 to 3)
+## What is in it so far (Stages 1 to 4a)
 
 | Area | What it does |
 | --- | --- |
@@ -17,10 +17,11 @@ The game is built in stages, each tried before the next starts. What the game do
 | Units | Click or drag to select; right-click the ground to move or an enemy to attack. Deployers make Minutemen from parts, acting on their own (Aggressive, Hold Point, Patrol, Explore) or waiting for orders at a rally point. Place units by hand from the Hub: made there, they walk to the spot and hold it. Unit limit 200. |
 | Combat | Melee and ranged rules from the spec, health, attacking structures, the Hub's pulse. A player whose Hub is destroyed is out, with everything they had. |
 | The Hub | Your inventory (2,000 items). Structures are paid from it and refunded into it. Move items into it by hand from any structure's panel. |
-| Production | Drills gather ore; Smelters and Constructors run the starting iron and copper recipes (Satisfactory's); Depots store anything. Ports that touch connect directly. |
-| Transport | Belts (drag to lay a line), Splitters and Mergers. Belts block ground units and can cross water. |
-| Power | Solar Generators, Power Poles and Power Lines. A grid blows when demand goes over supply and must be restarted by hand. |
-| Building | Pick from the build menu and place on the grid: never in fog, on water or on cliffs; a Drill goes on a node. Each structure takes a few seconds to build. Demolishing refunds the full cost. |
+| Research | At a powered Laboratory (U or the Research button): small bundles on a grid laid out at random for each player, tiers left to right. Research is instant and paid from the Hub; a bundle opens once one next to it is researched. |
+| Production | Drills gather ore and Pumps gather oil; Smelters, Constructors, Assemblers, Foundries, Refineries and Manufacturers run Satisfactory's recipes for every material in the spec; Depots store anything. Ports that touch connect directly. |
+| Transport | Belts (drag to lay a line), Splitters and Mergers; Pipes for fluids, one way like belts. Belts and pipes block ground units and can cross water. |
+| Power | Solar, Coal and Fuel Generators, Power Poles and Power Lines. Fuel comes by belt, pipe or by hand and burns as fast as the grid draws. A grid blows when demand goes over supply and must be restarted by hand. |
+| Building | Pick from the build menu (tabs; only what you have researched) and place on the grid: never in fog, on water or on cliffs; a Drill goes on a node, a Pump on an oil node. Each structure takes a few seconds to build. Demolishing refunds the full cost. |
 | Camera | W A S D or the arrow keys; zoom with the mouse wheel, a trackpad pinch, the on-screen buttons or + and -. |
 | Minimap | The whole map in the corner, with your units, structures and belts and what the main view shows. Click it to move the camera. |
 

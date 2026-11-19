@@ -77,6 +77,81 @@ class Heap {
   }
 }
 
+// Areas ground units can walk between: every open tile gets the number of its area (0 for a
+// blocked tile). Diagonal steps never cut corners, so side-by-side neighbors are enough. Worked
+// out again only after something that blocks units is built or removed.
+let regionOf: MatchState | null = null;
+let regionVersion = -1;
+let region = new Int32Array(0);
+let regionQueue = new Int32Array(0);
+
+function regions(s: MatchState): Int32Array {
+  if (regionOf === s && regionVersion === s.blockVersion) return region;
+  const size = s.size;
+  const n = size * size;
+  if (region.length !== n) {
+    region = new Int32Array(n);
+    regionQueue = new Int32Array(n);
+  } else region.fill(0);
+  let next = 0;
+  for (let i = 0; i < n; i++) {
+    if (region[i] !== 0 || !walkable(s, i)) continue;
+    next++;
+    region[i] = next;
+    let head = 0;
+    let tail = 0;
+    regionQueue[tail++] = i;
+    while (head < tail) {
+      const c = regionQueue[head++];
+      const x = c % size;
+      const nb = [x + 1 < size ? c + 1 : -1, x > 0 ? c - 1 : -1, c + size < n ? c + size : -1, c - size];
+      for (const j of nb) {
+        if (j < 0 || region[j] !== 0 || !walkable(s, j)) continue;
+        region[j] = next;
+        regionQueue[tail++] = j;
+      }
+    }
+  }
+  regionOf = s;
+  regionVersion = s.blockVersion;
+  return region;
+}
+
+/** Whether a ground unit could walk from one tile to the other. */
+export function reachable(s: MatchState, from: number, to: number) {
+  const reg = regions(s);
+  return reg[from] !== 0 && reg[from] === reg[to];
+}
+
+/** The tile of area `want` nearest `to` (straight-line), or -1. Ties go to the lower index. */
+function nearestInRegion(s: MatchState, reg: Int32Array, to: number, want: number): number {
+  const size = s.size;
+  const tx = to % size;
+  const ty = Math.floor(to / size);
+  let best = -1;
+  let bestD = Infinity;
+  let stopAt = size;
+  for (let r = 1; r <= stopAt && r < size; r++) {
+    for (let y = ty - r; y <= ty + r; y++) {
+      if (y < 0 || y >= size) continue;
+      const edge = y === ty - r || y === ty + r;
+      for (let x = tx - r; x <= tx + r; x += edge ? 1 : 2 * r) {
+        if (x < 0 || x >= size) continue;
+        const i = y * size + x;
+        if (reg[i] !== want) continue;
+        const d = (x - tx) * (x - tx) + (y - ty) * (y - ty);
+        if (d < bestD || (d === bestD && i < best)) {
+          bestD = d;
+          best = i;
+        }
+      }
+    }
+    // A ring of radius r holds tiles up to r * 1.42 away, so look a little further once found.
+    if (best >= 0 && stopAt === size) stopAt = Math.floor((r * 3) / 2) + 1;
+  }
+  return best;
+}
+
 function heuristic(size: number, a: number, b: number) {
   const dx = Math.abs((a % size) - (b % size));
   const dy = Math.abs(Math.floor(a / size) - Math.floor(b / size));
@@ -92,6 +167,13 @@ export function findPath(s: MatchState, from: number, to: number, maxExpand = 30
   if (from === to) return [];
   const size = s.size;
   ensure(size * size);
+  // A goal that cannot be reached (blocked, or walled off by structures, belts or water) is
+  // swapped for the nearest tile that can, so the search does not comb the whole map for it.
+  const reg = regions(s);
+  if (reg[from] !== 0 && reg[to] !== reg[from]) {
+    to = nearestInRegion(s, reg, to, reg[from]);
+    if (to < 0 || to === from) return [];
+  }
   stamp++;
   if (stamp === 0xffffffff) {
     seen.fill(0);

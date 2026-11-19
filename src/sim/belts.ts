@@ -1,7 +1,8 @@
-import { TRANSPORT, BELT_SPACING, BELT_SPEED, type TransportKind } from './content/transport';
+import { TRANSPORT, BELT_SPEED, spacingOf, type TransportKind } from './content/transport';
 import { bagAdd } from './content/items';
 import { BELT_HP } from './constants';
 import { canAfford, pay, refund } from './economy';
+import { transportUnlocked } from './research';
 import { deliver } from './flow';
 import { FP } from './fmath';
 import { Tile } from './map/types';
@@ -33,8 +34,8 @@ export function canPlaceBelt(s: MatchState, player: number, kind: TransportKind,
   const existing = s.beltAt[i];
   if (existing) {
     const b = cache(s).beltById.get(existing)!;
-    // Laying a belt over your own belt only turns it.
-    if (b.owner !== player || kind !== 'belt' || b.kind !== 'belt') return { ok: false, reason: 'Something is already built here.' };
+    // Laying a belt over your own belt (or a pipe over your own pipe) only turns it.
+    if (b.owner !== player || kind !== b.kind || (kind !== 'belt' && kind !== 'pipe')) return { ok: false, reason: 'Something is already built here.' };
   }
   for (const u of s.units) {
     if (u.owner !== player && unitTile(s, u) === i) return { ok: false, reason: 'Units are in the way.' };
@@ -50,7 +51,7 @@ export function newBeltCount(s: MatchState, tiles: readonly BeltTile[]) {
 /** Lays transport on all the tiles, or none of them if any cannot be placed or paid for. */
 export function placeBelts(s: MatchState, player: number, kind: TransportKind, tiles: readonly BeltTile[]) {
   const p = getPlayer(s, player);
-  if (!p || tiles.length === 0 || tiles.length > 400) return;
+  if (!p || tiles.length === 0 || tiles.length > 400 || !transportUnlocked(p, kind)) return;
   const seen = new Set<number>();
   for (const t of tiles) {
     if (!canPlaceBelt(s, player, kind, t.x, t.y).ok) return;
@@ -126,7 +127,7 @@ export function tickBelts(s: MatchState) {
     } else front.pos = p;
     // The rest follow, keeping their distance.
     for (let k = items.length > 0 && items[0] === front ? 1 : 0; k < items.length; k++) {
-      const limit = k === 0 ? FP : items[k - 1].pos - BELT_SPACING;
+      const limit = k === 0 ? FP : items[k - 1].pos - spacingOf(b.kind);
       items[k].pos = Math.min(items[k].pos + BELT_SPEED, limit);
     }
   }
