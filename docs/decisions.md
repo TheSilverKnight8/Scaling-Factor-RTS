@@ -44,6 +44,12 @@ Macro to micro, with a test checkpoint at the end of each stage. Keyboard shortc
 | How the research tree is laid out (Stage 4a) | A random grid: each player's bundles sit on a grid, tiers left to right, in a random order. |
 | How much one research item unlocks (Stage 4a) | Small bundles: a few related things each, like Satisfactory's milestones. |
 | How pipes work (Stage 4a) | Like belts: one way, laid tile by tile. |
+| How a Hauler is told its node and building (Stage 4b) | Both: the Garage sets a route for the Haulers it makes, and selected Haulers can be given their own. |
+| Which nodes Haulers gather from (Stage 4b) | Solid nodes only. A node with a Drill on it stays with the Drill. |
+| How rails carry cargo (Stage 4b) | A train with a stop list, like Satisfactory's timetables: it visits Rail Stations in order, loading and unloading at each. |
+| Rails and ground units (Stage 4b) | Units can cross rails. |
+| What trains carry (Stage 4b) | Solids and fluids. |
+| What a Command Post's directive does (Stage 4b) | A standing waypoint: your units acting on their own that come into its radius are sent on to a point set for that post; posts can be chained into routes. |
 
 Nothing is waiting on Caleb. Points for Caleb to look at when he tries each stage are under "Stage N: for Caleb to check".
 
